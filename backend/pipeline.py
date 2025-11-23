@@ -72,7 +72,7 @@ class DegPipeline:
             except Exception as e:
                 logger.warning(f"Could not load existing DCs: {e}")
 
-        self.dc_gen = DataCentreGenerator(n_dcs=48, existing_dcs=existing_dcs)
+        self.dc_gen = DataCentreGenerator(n_dcs=8, existing_dcs=existing_dcs)
 
         # In-memory state (for API serving)
         self.current_state = {

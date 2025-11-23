@@ -22,7 +22,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Configuration
-WORKLOAD_INTERVAL_MINUTES = 3  # Generate one workload every N minutes
+WORKLOAD_INTERVAL_MINUTES = 60  # Generate one workload every N minutes
 PIPELINE_INTERVAL_MINUTES = 30  # Update grid data every N minutes
 
 app = Flask(__name__)

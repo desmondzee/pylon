@@ -430,6 +430,19 @@ HTML_PAGE = """
             </div>
         </div>
 
+        <!-- System Reset -->
+        <h2>System Reset</h2>
+        <div class="section">
+            <div id="pending-status" style="margin-bottom: 15px; padding: 10px; background: #fff3cd; border: 1px solid #ffc107; border-radius: 4px; display: none;">
+                <strong>⚠️ Pending Notifications:</strong> <span id="pending-count">0</span> unprocessed tasks in database
+                <button onclick="checkPendingNotifications()" style="margin-left: 10px; padding: 2px 8px; font-size: 12px;">Refresh</button>
+            </div>
+            <p style="margin-bottom: 10px; color: #666;">Reset all services to clear pending tasks and start fresh.</p>
+            <button onclick="checkPendingNotifications()" style="margin-right: 10px;">Check Pending Tasks</button>
+            <button onclick="resetAllServices()" class="primary" style="background: #f44336;">Reset All Services</button>
+            <div id="reset-result" class="json-output" style="margin-top: 15px; display: none;"></div>
+        </div>
+
         <!-- Activity Log -->
         <h2>Activity Log</h2>
         <div class="section">
@@ -582,21 +595,35 @@ HTML_PAGE = """
 
             // Fetch all data in parallel
             try {
-                const [taskStatus, bgOutput, bppWeights, bapWeights] = await Promise.all([
+                const [taskStatus, bgOutput, bppWeights, bapWeights, bppQueue, bapPending] = await Promise.all([
                     fetch(`/api/task/${jobId}`).then(r => r.json()),
                     fetch('/api/bg/llm-output').then(r => r.json()),
                     fetch(`/api/bpp/weights/${jobId}`).then(r => r.json()),
-                    fetch(`/api/bap/weights/${jobId}`).then(r => r.json())
+                    fetch(`/api/bap/weights/${jobId}`).then(r => r.json()),
+                    fetch('/api/bpp/queue').then(r => r.json()),
+                    fetch('/api/bap/weights/pending').then(r => r.json())
                 ]);
+
+                // Build display for BPP with queue status
+                const bppDisplay = {
+                    weights: bppWeights,
+                    queue: bppQueue.data || bppQueue
+                };
+
+                // Build display for BAP with pending status
+                const bapDisplay = {
+                    weights: bapWeights,
+                    pending: bapPending.data || bapPending
+                };
 
                 // Display results
                 document.getElementById('task-status').textContent = JSON.stringify(taskStatus, null, 2);
                 document.getElementById('bg-output').textContent = JSON.stringify(bgOutput, null, 2);
-                document.getElementById('bpp-weights').textContent = JSON.stringify(bppWeights, null, 2);
-                document.getElementById('bap-weights').textContent = JSON.stringify(bapWeights, null, 2);
+                document.getElementById('bpp-weights').textContent = JSON.stringify(bppDisplay, null, 2);
+                document.getElementById('bap-weights').textContent = JSON.stringify(bapDisplay, null, 2);
 
                 // Update flow diagram
-                updateFlowFromData(taskStatus, bgOutput, bppWeights, bapWeights, jobId);
+                updateFlowFromData(taskStatus, bgOutput, bppWeights, bapWeights, jobId, bppQueue, bapPending);
 
             } catch (e) {
                 log('Tracking error: ' + e.message, 'error');
@@ -608,7 +635,7 @@ HTML_PAGE = """
             step.className = 'flow-step ' + status;
         }
 
-        function updateFlowFromData(taskStatus, bgOutput, bppWeights, bapWeights, jobId) {
+        function updateFlowFromData(taskStatus, bgOutput, bppWeights, bapWeights, jobId, bppQueue, bapPending) {
             // Reset all steps
             ['flow-submit', 'flow-db', 'flow-bg', 'flow-bpp', 'flow-fetch'].forEach(id => {
                 updateFlowStep(id, 'waiting');
@@ -628,18 +655,36 @@ HTML_PAGE = """
                 updateFlowStep('flow-bg', 'pending');
             }
 
-            // Check BPP weights
-            if (bppWeights.status === 'success' && bppWeights.data?.success) {
+            // Check BPP weights using queue data
+            const queueData = bppQueue?.data || bppQueue;
+            const completedTasks = queueData?.completed_tasks || [];
+            const inProgressTasks = queueData?.in_progress_tasks || [];
+            const currentlyProcessing = queueData?.currently_processing;
+
+            if (completedTasks.includes(jobId)) {
                 updateFlowStep('flow-bpp', 'active');
-                log(`BPP generated weights for ${jobId}`, 'info');
-            } else if (bppWeights.data?.status_code === 404) {
+                log(`BPP completed weights for ${jobId}`, 'info');
+            } else if (inProgressTasks.includes(jobId) || currentlyProcessing === jobId) {
                 updateFlowStep('flow-bpp', 'pending');
+                log(`BPP processing ${jobId}...`, 'info');
+            } else if (bppWeights.status === 'success' && bppWeights.data?.success) {
+                updateFlowStep('flow-bpp', 'active');
             }
 
-            // Check BAP fetched
+            // Check BAP fetched using pending data
+            const pendingData = bapPending?.data || bapPending;
+            const pendingJobs = pendingData?.pending_jobs || [];
+
             if (bapWeights.status === 'success' && bapWeights.data?.success) {
                 updateFlowStep('flow-fetch', 'active');
                 log(`BAP fetched weights for ${jobId}`, 'info');
+            } else if (bapWeights.status === 'success' && bapWeights.data?.top_3_recommendations) {
+                // Has recommendations
+                updateFlowStep('flow-fetch', 'active');
+                log(`BAP has recommendations for ${jobId}`, 'info');
+            } else if (pendingJobs.includes(jobId)) {
+                updateFlowStep('flow-fetch', 'pending');
+                log(`BAP waiting for weights for ${jobId}`, 'info');
             } else if (bapWeights.data?.status === 'pending') {
                 updateFlowStep('flow-fetch', 'pending');
             }
@@ -661,6 +706,69 @@ HTML_PAGE = """
                 pollingInterval = setInterval(trackTask, 5000);
                 btn.textContent = 'Stop Polling';
                 log('Polling started (5s interval)');
+            }
+        }
+
+        // Check pending notifications
+        async function checkPendingNotifications() {
+            try {
+                const response = await fetch('/api/bg/status');
+                const data = await response.json();
+                const statusDiv = document.getElementById('pending-status');
+                const countSpan = document.getElementById('pending-count');
+
+                if (data.unprocessed_notifications > 0) {
+                    statusDiv.style.display = 'block';
+                    statusDiv.style.background = '#fff3cd';
+                    countSpan.textContent = data.unprocessed_notifications;
+                    log(`Found ${data.unprocessed_notifications} unprocessed notifications in database`, 'warn');
+                } else {
+                    statusDiv.style.display = 'block';
+                    statusDiv.style.background = '#d4edda';
+                    statusDiv.innerHTML = '<strong>✓ No pending tasks</strong> - Database is clean';
+                    log('No pending notifications found', 'info');
+                }
+            } catch (e) {
+                log('Failed to check pending notifications: ' + e.message, 'error');
+            }
+        }
+
+        // Reset all services
+        async function resetAllServices() {
+            if (!confirm('This will clear all pending tasks, queues, and weights from BG and BPP. Continue?')) {
+                return;
+            }
+
+            log('Resetting all services...', 'warn');
+            const resultDiv = document.getElementById('reset-result');
+            resultDiv.style.display = 'block';
+            resultDiv.textContent = 'Resetting...';
+
+            try {
+                const response = await fetch('/api/reset/all', { method: 'POST' });
+                const data = await response.json();
+                resultDiv.textContent = JSON.stringify(data, null, 2);
+
+                if (data.status === 'success') {
+                    log('All services reset successfully', 'info');
+                    // Clear tracking displays
+                    document.getElementById('task-status').textContent = 'Reset - click Track to view';
+                    document.getElementById('bg-output').textContent = 'Reset - click Track to view';
+                    document.getElementById('bpp-weights').textContent = 'Reset - click Track to view';
+                    document.getElementById('bap-weights').textContent = 'Reset - click Track to view';
+                    // Update pending status to show clean
+                    const statusDiv = document.getElementById('pending-status');
+                    statusDiv.style.display = 'block';
+                    statusDiv.style.background = '#d4edda';
+                    statusDiv.innerHTML = '<strong>✓ All cleared</strong> - Database notifications marked as processed';
+                    // Refresh health
+                    checkAllHealth();
+                } else {
+                    log('Reset completed with some errors', 'warn');
+                }
+            } catch (e) {
+                log('Reset failed: ' + e.message, 'error');
+                resultDiv.textContent = 'Error: ' + e.message;
             }
         }
 
@@ -748,6 +856,16 @@ def api_bpp_status():
         return jsonify({"status": "error", "error": str(e)})
 
 
+@app.route("/api/bpp/queue")
+def api_bpp_queue():
+    """Get BPP processing queue (in-progress vs completed)"""
+    try:
+        response = requests.get(f"{SERVICES['bpp']['url']}/queue", timeout=10)
+        return jsonify({"status": "success", "data": response.json()})
+    except Exception as e:
+        return jsonify({"status": "error", "error": str(e)})
+
+
 @app.route("/api/bap/weights/<job_id>")
 def api_bap_weights(job_id):
     """Get weights stored in BAP"""
@@ -762,6 +880,57 @@ def api_bap_pending():
         return jsonify({"status": "success", "data": response.json()})
     except Exception as e:
         return jsonify({"status": "error", "error": str(e)})
+
+
+@app.route("/api/bg/status", methods=["GET"])
+def api_bg_status():
+    """Get BG status including unprocessed notification count"""
+    try:
+        response = requests.get(f"{SERVICES['bg']['url']}/beckn/status", timeout=10)
+        if response.status_code == 200:
+            return jsonify(response.json())
+        else:
+            return jsonify({"error": "Failed to get BG status", "code": response.status_code}), 500
+    except Exception as e:
+        return jsonify({"error": str(e), "unprocessed_notifications": 0}), 500
+
+
+@app.route("/api/reset/all", methods=["POST"])
+def api_reset_all():
+    """Reset all services - clears BG and BPP state"""
+    results = {
+        "bg": {"status": "skipped"},
+        "bpp": {"status": "skipped"}
+    }
+
+    # Reset BG
+    try:
+        response = requests.post(f"{SERVICES['bg']['url']}/beckn/reset", timeout=15)
+        if response.status_code == 200:
+            results["bg"] = {"status": "success", "data": response.json()}
+        else:
+            results["bg"] = {"status": "error", "code": response.status_code}
+    except Exception as e:
+        results["bg"] = {"status": "error", "error": str(e)}
+
+    # Reset BPP
+    try:
+        response = requests.post(f"{SERVICES['bpp']['url']}/reset", timeout=15)
+        if response.status_code == 200:
+            results["bpp"] = {"status": "success", "data": response.json()}
+        else:
+            results["bpp"] = {"status": "error", "code": response.status_code}
+    except Exception as e:
+        results["bpp"] = {"status": "error", "error": str(e)}
+
+    # Check if all succeeded
+    all_success = all(r.get("status") == "success" for r in results.values())
+
+    return jsonify({
+        "status": "success" if all_success else "partial",
+        "message": "All services reset" if all_success else "Some services failed to reset",
+        "results": results
+    })
 
 
 # =============================================================================

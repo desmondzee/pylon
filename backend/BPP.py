@@ -44,7 +44,8 @@ logger = logging.getLogger("BPP")
 # Configuration
 BG_BASE_URL = os.environ.get("BG_BASE_URL", "http://localhost:5050")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
-GEMINI_MODEL = os.environ.get("BPP_GEMINI_MODEL", "gemini-2.5-flash")
+# Valid models: gemini-2.0-flash, gemini-2.0-flash-exp, gemini-1.5-flash, gemini-1.5-pro
+GEMINI_MODEL = os.environ.get("BPP_GEMINI_MODEL", "gemini-2.0-flash")
 BPP_PORT = 5051
 BPP_HOST = "0.0.0.0"
 POLL_INTERVAL = int(os.environ.get("BPP_POLL_INTERVAL", "3"))  # seconds
@@ -72,9 +73,16 @@ app = Flask(__name__)
 weight_storage = {}
 storage_lock = Lock()
 
-# Track last processed task to avoid reprocessing
+# Track ALL processed task IDs to avoid reprocessing (persists for session)
+processed_task_ids = set()
+processed_task_ids_lock = Lock()
+
+# Track the most recent processed task (for status display)
 last_processed_task_id = None
-last_processed_lock = Lock()
+
+# Track tasks currently being processed (in-flight)
+processing_queue = set()
+processing_queue_lock = Lock()
 
 # Processing status
 processing_status = {
@@ -83,7 +91,8 @@ processing_status = {
     "total_tasks_processed": 0,
     "total_weights_generated": 0,
     "bg_connected": False,
-    "last_error": None
+    "last_error": None,
+    "currently_processing": None
 }
 
 
@@ -358,34 +367,95 @@ def polling_worker():
                 metadata = llm_output.get("_metadata", {})
                 task_id = metadata.get("task_id")
 
-                # Check if this is a new task (not already processed)
-                with last_processed_lock:
-                    if task_id and task_id != last_processed_task_id:
-                        logger.info(f"\nNew task detected: {task_id}")
+                if not task_id:
+                    logger.debug("No task_id in LLM output metadata, skipping")
+                    time.sleep(POLL_INTERVAL)
+                    continue
 
-                        # Process the LLM output
-                        result = process_llm_output(llm_output)
+                # Check if this task has already been processed (check the SET, not just last ID)
+                with processed_task_ids_lock:
+                    already_processed = task_id in processed_task_ids
 
-                        # Store the weights
-                        with storage_lock:
-                            weight_storage[task_id] = result
+                if already_processed:
+                    # Task already processed, skip
+                    logger.debug(f"Task {task_id} already processed, skipping")
+                    time.sleep(POLL_INTERVAL)
+                    continue
 
-                        # Update tracking
-                        last_processed_task_id = task_id
-                        processing_status["total_tasks_processed"] += 1
-                        processing_status["last_error"] = None
+                # Check if task is currently being processed
+                with processing_queue_lock:
+                    currently_processing = task_id in processing_queue
 
-                        logger.info(f"\n{'='*80}")
-                        logger.info(f"TASK PROCESSING COMPLETE")
-                        logger.info(f"Job ID: {task_id}")
-                        logger.info(f"Weights Generated: {result['successful_weights']}/{result['total_dcs']}")
-                        logger.info(f"{'='*80}\n")
+                if currently_processing:
+                    logger.debug(f"Task {task_id} is currently being processed, skipping")
+                    time.sleep(POLL_INTERVAL)
+                    continue
+
+                # NEW TASK - process it
+                logger.info(f"\n{'='*80}")
+                logger.info(f"NEW TASK DETECTED: {task_id}")
+                logger.info(f"{'='*80}")
+
+                # Add to processing queue FIRST (before any processing)
+                with processing_queue_lock:
+                    processing_queue.add(task_id)
+                processing_status["currently_processing"] = task_id
+
+                try:
+                    # Process the LLM output
+                    result = process_llm_output(llm_output)
+
+                    # Store the weights
+                    with storage_lock:
+                        weight_storage[task_id] = result
+
+                    # Mark as processed (add to the SET of processed IDs)
+                    with processed_task_ids_lock:
+                        processed_task_ids.add(task_id)
+
+                    # Acknowledge to BG that we've processed this task (clears the output)
+                    try:
+                        ack_response = requests.post(
+                            f"{BG_BASE_URL}/beckn/llm-output/acknowledge",
+                            json={"task_id": task_id},
+                            timeout=5
+                        )
+                        if ack_response.status_code == 200:
+                            ack_data = ack_response.json()
+                            if ack_data.get("cleared"):
+                                logger.info(f"Acknowledged task {task_id} to BG - output cleared")
+                            else:
+                                logger.debug(f"Acknowledged task {task_id} to BG - no output to clear")
+                        else:
+                            logger.warning(f"Failed to acknowledge task to BG: {ack_response.status_code}")
+                    except Exception as ack_error:
+                        logger.warning(f"Could not acknowledge task to BG: {ack_error}")
+
+                    # Update tracking
+                    last_processed_task_id = task_id
+                    processing_status["total_tasks_processed"] += 1
+                    processing_status["last_error"] = None
+
+                    logger.info(f"\n{'='*80}")
+                    logger.info(f"TASK PROCESSING COMPLETE")
+                    logger.info(f"Job ID: {task_id}")
+                    logger.info(f"Weights Generated: {result['successful_weights']}/{result['total_dcs']}")
+                    logger.info(f"Total tasks processed this session: {len(processed_task_ids)}")
+                    logger.info(f"{'='*80}\n")
+
+                finally:
+                    # Always remove from processing queue when done (success or failure)
+                    with processing_queue_lock:
+                        processing_queue.discard(task_id)
+                    processing_status["currently_processing"] = None
 
             time.sleep(POLL_INTERVAL)
 
         except Exception as e:
             logger.error(f"Error in polling worker: {e}")
             processing_status["last_error"] = str(e)
+            # Clear currently processing on error
+            processing_status["currently_processing"] = None
             time.sleep(POLL_INTERVAL)
 
 
@@ -396,20 +466,30 @@ def polling_worker():
 @app.route("/")
 def home():
     """Service info"""
+    with processing_queue_lock:
+        in_progress_count = len(processing_queue)
+    with storage_lock:
+        completed_count = len(weight_storage)
+
     return jsonify({
         "service": "Beckn Protocol Provider (BPP) - Weight Assignment Service",
-        "version": "2.0.0",
+        "version": "2.1.0",
         "port": BPP_PORT,
         "endpoints": {
-            "/weights": "GET - Retrieve all weight assignments",
-            "/weights/<job_id>": "GET - Retrieve weights for specific task",
+            "/weights": "GET - Retrieve all weight assignments (completed)",
+            "/weights/<job_id>": "GET/DELETE - Retrieve or delete weights for specific task",
             "/weights/latest": "GET - Retrieve most recent weight assignment",
-            "/status": "GET - Processing status",
+            "/weights/clear": "POST - Clear all completed tasks from storage",
+            "/queue": "GET - Processing queue (in-progress vs completed)",
+            "/status": "GET - Detailed processing status",
             "/health": "GET - Health check"
         },
         "beckn_gateway": BG_BASE_URL,
         "gemini_model": GEMINI_MODEL,
-        "poll_interval_seconds": POLL_INTERVAL
+        "poll_interval_seconds": POLL_INTERVAL,
+        "currently_processing": processing_status["currently_processing"],
+        "in_progress_tasks": in_progress_count,
+        "completed_tasks": completed_count
     })
 
 
@@ -435,7 +515,13 @@ def health():
 def status():
     """Detailed processing status"""
     with storage_lock:
-        task_ids = list(weight_storage.keys())
+        tasks_in_storage = list(weight_storage.keys())
+
+    with processing_queue_lock:
+        in_progress_tasks = list(processing_queue)
+
+    with processed_task_ids_lock:
+        all_processed = list(processed_task_ids)
 
     return jsonify({
         "bg_connected": processing_status["bg_connected"],
@@ -443,10 +529,37 @@ def status():
         "last_poll": processing_status["last_poll"],
         "total_tasks_processed": processing_status["total_tasks_processed"],
         "total_weights_generated": processing_status["total_weights_generated"],
-        "tasks_in_storage": task_ids,
+        "currently_processing": processing_status["currently_processing"],
+        "in_progress_tasks": in_progress_tasks,
+        "processed_task_ids": all_processed,
+        "tasks_in_storage": tasks_in_storage,
         "last_processed_task": last_processed_task_id,
         "beckn_gateway": BG_BASE_URL,
         "last_error": processing_status["last_error"]
+    })
+
+
+@app.route("/queue")
+def get_queue():
+    """Get current processing queue status - shows in-progress vs completed tasks"""
+    with processing_queue_lock:
+        in_progress = list(processing_queue)
+
+    with storage_lock:
+        tasks_with_weights = list(weight_storage.keys())
+
+    with processed_task_ids_lock:
+        all_processed = list(processed_task_ids)
+
+    return jsonify({
+        "success": True,
+        "currently_processing": processing_status["currently_processing"],
+        "in_progress_count": len(in_progress),
+        "in_progress_tasks": in_progress,
+        "completed_count": len(tasks_with_weights),
+        "completed_tasks": tasks_with_weights,
+        "all_processed_ids": all_processed,
+        "total_processed": processing_status["total_tasks_processed"]
     })
 
 
@@ -504,6 +617,91 @@ def get_task_weights(job_id):
             "job_id": job_id,
             "data": weight_storage[job_id]
         })
+
+
+@app.route("/weights/<job_id>", methods=["DELETE"])
+def delete_task_weights(job_id):
+    """Delete weight assignments for a specific task (clear from storage)"""
+    with storage_lock:
+        if job_id not in weight_storage:
+            return jsonify({
+                "success": False,
+                "error": f"No weights found for task {job_id}"
+            }), 404
+
+        del weight_storage[job_id]
+        logger.info(f"Deleted weights for task: {job_id}")
+
+        return jsonify({
+            "success": True,
+            "message": f"Weights for {job_id} deleted"
+        })
+
+
+@app.route("/weights/clear", methods=["POST"])
+def clear_all_weights():
+    """Clear all completed tasks from storage"""
+    with storage_lock:
+        count = len(weight_storage)
+        weight_storage.clear()
+
+    logger.info(f"Cleared all weights ({count} tasks)")
+
+    return jsonify({
+        "success": True,
+        "message": f"Cleared {count} completed tasks from storage"
+    })
+
+
+@app.route("/reset", methods=["POST"])
+def reset_bpp_state():
+    """
+    Full reset of BPP state - clears weights, processed task IDs, and processing queue.
+    Use this to start fresh without any memory of previous tasks.
+    """
+    global last_processed_task_id
+
+    cleared_items = []
+
+    # Clear weight storage
+    with storage_lock:
+        weights_count = len(weight_storage)
+        weight_storage.clear()
+        if weights_count > 0:
+            cleared_items.append(f"weight_storage ({weights_count})")
+
+    # Clear processed task IDs
+    with processed_task_ids_lock:
+        processed_count = len(processed_task_ids)
+        processed_task_ids.clear()
+        if processed_count > 0:
+            cleared_items.append(f"processed_task_ids ({processed_count})")
+
+    # Clear processing queue
+    with processing_queue_lock:
+        queue_count = len(processing_queue)
+        processing_queue.clear()
+        if queue_count > 0:
+            cleared_items.append(f"processing_queue ({queue_count})")
+
+    # Reset last processed task ID
+    last_processed_task_id = None
+    cleared_items.append("last_processed_task_id")
+
+    # Reset processing status counters
+    processing_status["total_tasks_processed"] = 0
+    processing_status["total_weights_generated"] = 0
+    processing_status["currently_processing"] = None
+    processing_status["last_error"] = None
+    cleared_items.append("processing_status")
+
+    logger.info(f"BPP state reset - cleared: {cleared_items}")
+
+    return jsonify({
+        "success": True,
+        "message": "BPP state reset successfully",
+        "cleared": cleared_items
+    })
 
 
 # =============================================================================

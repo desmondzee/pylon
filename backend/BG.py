@@ -27,7 +27,7 @@ from queue import Queue, Empty
 from threading import Thread, Lock
 
 from dotenv import load_dotenv
-from flask import Flask, jsonify, Response
+from flask import Flask, jsonify, Response, request
 from supabase import create_client, Client
 from google import genai
 
@@ -60,7 +60,8 @@ BG_AGENT_NAME = "Beckn Gateway LLM Orchestrator"
 BG_AGENT_TYPE = "COMPUTE_ORCHESTRATOR"
 
 # Gemini model configuration
-GEMINI_MODEL = "gemini-2.5-flash"
+# Valid models: gemini-2.0-flash, gemini-2.0-flash-exp, gemini-1.5-flash, gemini-1.5-pro
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
 
 # Initialize Gemini client (uses GEMINI_API_KEY env var automatically)
 gemini_client = None
@@ -820,159 +821,171 @@ class TriggerQueueMonitor:
         global current_decision_context
 
         try:
-            # Check if we're currently processing a task
+            # Check if we're currently processing a task - hold lock during DB query
+            # to prevent race conditions
             with decision_context_lock:
                 if current_decision_context is not None and not current_decision_context.get("processed", False):
                     # Current task not yet processed, skip this cycle
                     logger.debug("Waiting for current task to be processed...")
                     return 0
 
-            # Get unprocessed notifications ordered by creation time
-            result = self.client.table("workload_notifications") \
-                .select("*") \
-                .eq("processed", False) \
-                .order("created_at", desc=False) \
-                .limit(1) \
-                .execute()
-
-            notifications = result.data or []
-
-            if not notifications:
-                # Check if there are pending tasks in the queue
-                if not pending_tasks_queue.empty():
-                    try:
-                        pending_notification = pending_tasks_queue.get_nowait()
-                        notifications = [pending_notification]
-                        logger.info("Processing pending task from queue")
-                    except Empty:
-                        pass
-
-            for notification in notifications:
-                job_id = notification.get('job_id')
-                logger.info(f"Processing notification for job: {job_id}")
-
-                # Extract workload payload
-                payload = notification.get("payload", {})
-
-                # Update agent state to ACTIVE (processing)
-                update_agent_state(
-                    self.client,
-                    status="ACTIVE",
-                    state_data={"current_job_id": job_id, "stage": "building_context"},
-                    triggered_by=f"workload_notification:{job_id}"
-                )
-
-                # Create decision context with all relevant data
-                with decision_context_lock:
-                    current_decision_context = self.create_decision_context(payload)
-
-                # Print the decision context
-                print("\n" + "=" * 80)
-                print("NEW DECISION CONTEXT CREATED")
-                print("=" * 80)
-                print(json.dumps(current_decision_context, indent=2, default=str))
-                print("=" * 80 + "\n")
-
-                logger.info(f"Decision context created for job: {payload.get('job_id')}")
-                logger.info(f"  - Task urgency: {payload.get('urgency')}")
-                logger.info(f"  - Carbon cap: {payload.get('carbon_cap_gco2')} gCO2")
-                logger.info(f"  - Available DCs: {current_decision_context['summary']['available_dc_count']}")
-
-                # Update agent state to EXECUTING (calling LLM)
-                update_agent_state(
-                    self.client,
-                    status="EXECUTING",
-                    state_data={"current_job_id": job_id, "stage": "calling_llm"},
-                    triggered_by="llm_processing_start"
-                )
-
-                # Process with Gemini LLM
-                llm_output = process_with_llm(current_decision_context)
-
-                if llm_output:
-                    # Store LLM output for BPP
-                    store_llm_output(llm_output)
-
-                    # Print LLM output
-                    print("\n" + "=" * 80)
-                    print("GEMINI LLM OUTPUT")
-                    print("=" * 80)
-                    print(json.dumps(llm_output, indent=2, default=str))
-                    print("=" * 80 + "\n")
-
-                    # Find recommended DC (highest suitability score)
-                    recommended_dc = None
-                    dc_options = llm_output.get("data_centre_options", [])
-                    if dc_options:
-                        available_dcs = [dc for dc in dc_options if dc.get("compute_profile", {}).get("available_for_task", False)]
-                        if available_dcs:
-                            recommended_dc = max(available_dcs, key=lambda x: x.get("suitability_score", 0))
-                        elif dc_options:
-                            recommended_dc = max(dc_options, key=lambda x: x.get("suitability_score", 0))
-
-                    # Log orchestration decision (success)
-                    log_orchestration_decision(
-                        client=self.client,
-                        decision_type="LLM_DC_SELECTION",
-                        workload_job_id=job_id,
-                        reasoning=json.dumps(llm_output, default=str),
-                        llm_output=llm_output,
-                        decision_context=current_decision_context,
-                        recommended_dc=recommended_dc
-                    )
-
-                    # Add to broadcast queue
-                    broadcast_msg = {
-                        "context": create_beckn_context(action="llm_output"),
-                        "type": "llm_processed",
-                        "llm_output": llm_output
-                    }
-                    broadcast_queue.put(broadcast_msg)
-
-                    logger.info("LLM output broadcasted successfully")
-                    bg_agent_state["tasks_processed"] += 1
-                else:
-                    logger.error("Failed to process with LLM - no output generated")
-                    bg_agent_state["last_error"] = f"LLM processing failed for {job_id}"
-
-                    # Log orchestration decision (failure)
-                    log_orchestration_decision(
-                        client=self.client,
-                        decision_type="LLM_PROCESSING_FAILED",
-                        workload_job_id=job_id,
-                        reasoning=f"LLM processing failed after {LLM_MAX_RETRIES + 1} attempts. No valid output generated.",
-                        decision_context=current_decision_context
-                    )
-
-                # Mark decision context as processed
-                with decision_context_lock:
-                    current_decision_context["processed"] = True
-                    current_decision_context["processed_at"] = datetime.now(timezone.utc).isoformat()
-
-                # Create Beckn broadcast message for workload
-                broadcast_msg = create_broadcast_message(payload)
-                broadcast_queue.put(broadcast_msg)
-
-                # Add to catalog
-                catalog_items.append(workload_to_beckn_item(payload))
-
-                # Mark notification as processed in database
-                self.client.table("workload_notifications") \
-                    .update({"processed": True}) \
-                    .eq("id", notification["id"]) \
+                # Get unprocessed notifications ordered by creation time
+                # Do this INSIDE the lock to prevent race conditions
+                result = self.client.table("workload_notifications") \
+                    .select("*") \
+                    .eq("processed", False) \
+                    .order("created_at", desc=False) \
+                    .limit(1) \
                     .execute()
 
-                # Update agent state back to IDLE
-                update_agent_state(
-                    self.client,
-                    status="IDLE",
-                    state_data={"last_job_id": job_id, "tasks_processed": bg_agent_state["tasks_processed"]},
-                    triggered_by=f"task_completed:{job_id}"
+                notifications = result.data or []
+
+                if not notifications:
+                    # Check if there are pending tasks in the queue
+                    if not pending_tasks_queue.empty():
+                        try:
+                            pending_notification = pending_tasks_queue.get_nowait()
+                            notifications = [pending_notification]
+                            logger.info("Processing pending task from queue")
+                        except Empty:
+                            pass
+
+                if not notifications:
+                    return 0
+
+                # Get the first notification and immediately set current_decision_context
+                # to a placeholder to prevent other polls from picking it up
+                notification = notifications[0]
+                job_id = notification.get('job_id')
+
+                # Set a placeholder to block other poll cycles
+                current_decision_context = {"_placeholder": True, "job_id": job_id, "processed": False}
+
+            # Now process outside the lock (but we've claimed this task)
+            logger.info(f"Processing notification for job: {job_id}")
+
+            # Extract workload payload
+            payload = notification.get("payload", {})
+
+            # Update agent state to ACTIVE (processing)
+            update_agent_state(
+                self.client,
+                status="ACTIVE",
+                state_data={"current_job_id": job_id, "stage": "building_context"},
+                triggered_by=f"workload_notification:{job_id}"
+            )
+
+            # Create decision context with all relevant data
+            with decision_context_lock:
+                current_decision_context = self.create_decision_context(payload)
+
+            # Print the decision context
+            print("\n" + "=" * 80)
+            print("NEW DECISION CONTEXT CREATED")
+            print("=" * 80)
+            print(json.dumps(current_decision_context, indent=2, default=str))
+            print("=" * 80 + "\n")
+
+            logger.info(f"Decision context created for job: {payload.get('job_id')}")
+            logger.info(f"  - Task urgency: {payload.get('urgency')}")
+            logger.info(f"  - Carbon cap: {payload.get('carbon_cap_gco2')} gCO2")
+            logger.info(f"  - Available DCs: {current_decision_context['summary']['available_dc_count']}")
+
+            # Update agent state to EXECUTING (calling LLM)
+            update_agent_state(
+                self.client,
+                status="EXECUTING",
+                state_data={"current_job_id": job_id, "stage": "calling_llm"},
+                triggered_by="llm_processing_start"
+            )
+
+            # Process with Gemini LLM
+            llm_output = process_with_llm(current_decision_context)
+
+            if llm_output:
+                # Store LLM output for BPP
+                store_llm_output(llm_output)
+
+                # Print LLM output
+                print("\n" + "=" * 80)
+                print("GEMINI LLM OUTPUT")
+                print("=" * 80)
+                print(json.dumps(llm_output, indent=2, default=str))
+                print("=" * 80 + "\n")
+
+                # Find recommended DC (highest suitability score)
+                recommended_dc = None
+                dc_options = llm_output.get("data_centre_options", [])
+                if dc_options:
+                    available_dcs = [dc for dc in dc_options if dc.get("compute_profile", {}).get("available_for_task", False)]
+                    if available_dcs:
+                        recommended_dc = max(available_dcs, key=lambda x: x.get("suitability_score", 0))
+                    elif dc_options:
+                        recommended_dc = max(dc_options, key=lambda x: x.get("suitability_score", 0))
+
+                # Log orchestration decision (success)
+                log_orchestration_decision(
+                    client=self.client,
+                    decision_type="LLM_DC_SELECTION",
+                    workload_job_id=job_id,
+                    reasoning=json.dumps(llm_output, default=str),
+                    llm_output=llm_output,
+                    decision_context=current_decision_context,
+                    recommended_dc=recommended_dc
                 )
 
-                logger.info(f"Workload {job_id} fully processed")
+                # Add to broadcast queue
+                broadcast_msg = {
+                    "context": create_beckn_context(action="llm_output"),
+                    "type": "llm_processed",
+                    "llm_output": llm_output
+                }
+                broadcast_queue.put(broadcast_msg)
 
-            return len(notifications)
+                logger.info("LLM output broadcasted successfully")
+                bg_agent_state["tasks_processed"] += 1
+            else:
+                logger.error("Failed to process with LLM - no output generated")
+                bg_agent_state["last_error"] = f"LLM processing failed for {job_id}"
+
+                # Log orchestration decision (failure)
+                log_orchestration_decision(
+                    client=self.client,
+                    decision_type="LLM_PROCESSING_FAILED",
+                    workload_job_id=job_id,
+                    reasoning=f"LLM processing failed after {LLM_MAX_RETRIES + 1} attempts. No valid output generated.",
+                    decision_context=current_decision_context
+                )
+
+            # Mark decision context as processed
+            with decision_context_lock:
+                current_decision_context["processed"] = True
+                current_decision_context["processed_at"] = datetime.now(timezone.utc).isoformat()
+
+            # Create Beckn broadcast message for workload
+            broadcast_msg = create_broadcast_message(payload)
+            broadcast_queue.put(broadcast_msg)
+
+            # Add to catalog
+            catalog_items.append(workload_to_beckn_item(payload))
+
+            # Mark notification as processed in database
+            self.client.table("workload_notifications") \
+                .update({"processed": True}) \
+                .eq("id", notification["id"]) \
+                .execute()
+
+            # Update agent state back to IDLE
+            update_agent_state(
+                self.client,
+                status="IDLE",
+                state_data={"last_job_id": job_id, "tasks_processed": bg_agent_state["tasks_processed"]},
+                triggered_by=f"task_completed:{job_id}"
+            )
+
+            logger.info(f"Workload {job_id} fully processed")
+
+            return 1
 
         except Exception as e:
             logger.error(f"Error processing notifications: {e}")
@@ -1200,6 +1213,181 @@ def get_llm_output_history():
         "status": "success",
         "count": len(history),
         "outputs": history
+    })
+
+
+@app.route("/beckn/llm-output/clear", methods=["POST"])
+def clear_llm_output():
+    """
+    Clear the latest LLM output after BPP has processed it.
+    This prevents BPP from reprocessing the same task.
+    """
+    with llm_output_store["lock"]:
+        task_id = None
+        if llm_output_store["latest"]:
+            task_id = llm_output_store["latest"].get("_metadata", {}).get("task_id")
+        llm_output_store["latest"] = None
+
+    if task_id:
+        logger.info(f"Cleared LLM output for task: {task_id}")
+        return jsonify({
+            "status": "success",
+            "message": f"LLM output cleared for task {task_id}",
+            "cleared_task_id": task_id
+        })
+    return jsonify({
+        "status": "success",
+        "message": "No LLM output to clear"
+    })
+
+
+@app.route("/beckn/llm-output/acknowledge", methods=["POST"])
+def acknowledge_llm_output():
+    """
+    Acknowledge that a specific task has been processed by BPP.
+    Clears the latest output only if it matches the acknowledged task_id.
+    """
+    data = request.get_json() or {}
+    task_id = data.get("task_id")
+
+    if not task_id:
+        return jsonify({"status": "error", "message": "task_id is required"}), 400
+
+    with llm_output_store["lock"]:
+        current_task_id = None
+        if llm_output_store["latest"]:
+            current_task_id = llm_output_store["latest"].get("_metadata", {}).get("task_id")
+
+        if current_task_id == task_id:
+            llm_output_store["latest"] = None
+            logger.info(f"Acknowledged and cleared LLM output for task: {task_id}")
+            return jsonify({
+                "status": "success",
+                "message": f"Task {task_id} acknowledged and cleared",
+                "cleared": True
+            })
+
+    return jsonify({
+        "status": "success",
+        "message": f"Task {task_id} acknowledged (no matching output to clear)",
+        "cleared": False
+    })
+
+
+@app.route("/beckn/status", methods=["GET"])
+def get_bg_status():
+    """
+    Get BG status including count of unprocessed notifications in database.
+    Use this to check if there are old tasks pending from previous runs.
+    """
+    status = {
+        "service": "BG (Beckn Gateway)",
+        "port": BG_PORT,
+        "current_decision_context": None,
+        "pending_tasks_queue_size": pending_tasks_queue.qsize(),
+        "broadcast_queue_size": broadcast_queue.qsize(),
+        "llm_output_available": llm_output_store["latest"] is not None,
+        "llm_history_count": len(llm_output_store["history"]),
+        "unprocessed_notifications": 0,
+        "database_connected": False
+    }
+
+    # Get current decision context info
+    with decision_context_lock:
+        if current_decision_context:
+            status["current_decision_context"] = {
+                "job_id": current_decision_context.get("task", {}).get("job_id") or current_decision_context.get("job_id"),
+                "processed": current_decision_context.get("processed", False)
+            }
+
+    # Check database for unprocessed notifications
+    if monitor and monitor.client:
+        status["database_connected"] = True
+        try:
+            count_result = monitor.client.table("workload_notifications") \
+                .select("id", count="exact") \
+                .eq("processed", False) \
+                .execute()
+            status["unprocessed_notifications"] = count_result.count or 0
+        except Exception as e:
+            status["database_error"] = str(e)
+
+    return jsonify(status)
+
+
+@app.route("/beckn/reset", methods=["POST"])
+def reset_bg_state():
+    """
+    Reset BG state - clears LLM output, pending tasks queue, and optionally
+    marks all unprocessed notifications as processed in database.
+    Use this to start fresh without pending tasks from previous runs.
+    """
+    global current_decision_context
+
+    cleared_items = []
+
+    # Clear LLM output store
+    with llm_output_store["lock"]:
+        if llm_output_store["latest"]:
+            cleared_items.append("llm_output")
+        llm_output_store["latest"] = None
+        llm_output_store["history"].clear()
+
+    # Clear pending tasks queue
+    pending_cleared = 0
+    while not pending_tasks_queue.empty():
+        try:
+            pending_tasks_queue.get_nowait()
+            pending_cleared += 1
+        except Empty:
+            break
+    if pending_cleared > 0:
+        cleared_items.append(f"pending_tasks_queue ({pending_cleared})")
+
+    # Clear broadcast queue
+    broadcast_cleared = 0
+    while not broadcast_queue.empty():
+        try:
+            broadcast_queue.get_nowait()
+            broadcast_cleared += 1
+        except Empty:
+            break
+    if broadcast_cleared > 0:
+        cleared_items.append(f"broadcast_queue ({broadcast_cleared})")
+
+    # Clear current decision context
+    with decision_context_lock:
+        current_decision_context = None
+    cleared_items.append("decision_context")
+
+    # Optionally mark all unprocessed notifications as processed in database
+    db_cleared = 0
+    if monitor and monitor.client:
+        try:
+            # Get count of unprocessed
+            count_result = monitor.client.table("workload_notifications") \
+                .select("id", count="exact") \
+                .eq("processed", False) \
+                .execute()
+
+            if count_result.count and count_result.count > 0:
+                # Mark all as processed
+                monitor.client.table("workload_notifications") \
+                    .update({"processed": True}) \
+                    .eq("processed", False) \
+                    .execute()
+                db_cleared = count_result.count
+                cleared_items.append(f"db_notifications ({db_cleared})")
+        except Exception as e:
+            logger.warning(f"Could not clear database notifications: {e}")
+
+    logger.info(f"BG state reset - cleared: {cleared_items}")
+
+    return jsonify({
+        "status": "success",
+        "message": "BG state reset successfully",
+        "cleared": cleared_items,
+        "db_notifications_cleared": db_cleared
     })
 
 
