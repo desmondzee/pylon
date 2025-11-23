@@ -8,15 +8,20 @@ Flow:
 1. Frontend submits task via POST /task
 2. BAP validates and inserts into compute_workloads table
 3. Database trigger notifies BG of new workload
-4. BG processes with LLM and broadcasts results
+4. BG processes with LLM and outputs DC suitability scores
+5. BPP generates weight assignments per DC
+6. BAP fetches weights from BPP and stores them locally
 
 Port: 5052
 """
 
 import os
 import logging
+import requests
+import time
 from datetime import datetime, timezone
 from pathlib import Path
+from threading import Thread, Lock
 
 from dotenv import load_dotenv
 from flask import Flask, jsonify, request
@@ -37,8 +42,10 @@ logger = logging.getLogger("BAP")
 # Configuration
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
+BPP_BASE_URL = os.environ.get("BPP_BASE_URL", "http://localhost:5051")
 BAP_PORT = 5052
 BAP_HOST = "0.0.0.0"
+WEIGHT_POLL_INTERVAL = 5  # seconds between polling BPP for weights
 
 # Flask app
 app = Flask(__name__)
@@ -46,6 +53,15 @@ CORS(app)  # Enable CORS for frontend access
 
 # Supabase client
 db_client: Client = None
+
+# In-memory storage for weights fetched from BPP
+# Format: {job_id: {"task": {...}, "weights": [...], "fetched_at": ...}}
+weight_storage = {}
+weight_storage_lock = Lock()
+
+# Track pending jobs waiting for weights
+pending_weight_jobs = set()
+pending_jobs_lock = Lock()
 
 
 def init_db():
@@ -85,24 +101,123 @@ def get_dc_uuid(dc_id: str) -> str:
 
 
 # =============================================================================
+# WEIGHT FETCHING FROM BPP
+# =============================================================================
+
+def fetch_weights_from_bpp(job_id: str) -> dict:
+    """
+    Fetch weight assignments for a specific job from BPP.
+    Returns the weight data or None if not available.
+    """
+    try:
+        response = requests.get(f"{BPP_BASE_URL}/weights/{job_id}", timeout=10)
+
+        if response.status_code == 200:
+            data = response.json()
+            if data.get("success"):
+                return data.get("data")
+        elif response.status_code == 404:
+            # Weights not ready yet
+            return None
+
+        return None
+
+    except requests.exceptions.RequestException as e:
+        logger.debug(f"Error fetching weights for {job_id}: {e}")
+        return None
+
+
+def weight_polling_worker():
+    """
+    Background thread that polls BPP for weights of pending jobs.
+    When weights are found, stores them locally.
+    """
+    logger.info("Starting weight polling worker...")
+
+    while True:
+        try:
+            # Get list of pending jobs
+            with pending_jobs_lock:
+                jobs_to_check = list(pending_weight_jobs)
+
+            for job_id in jobs_to_check:
+                # Check if we already have weights for this job
+                with weight_storage_lock:
+                    if job_id in weight_storage:
+                        with pending_jobs_lock:
+                            pending_weight_jobs.discard(job_id)
+                        continue
+
+                # Try to fetch weights from BPP
+                weight_data = fetch_weights_from_bpp(job_id)
+
+                if weight_data:
+                    # Store the weights
+                    with weight_storage_lock:
+                        weight_storage[job_id] = {
+                            "job_id": job_id,
+                            "task": weight_data.get("task", {}),
+                            "weights": weight_data.get("weights", []),
+                            "total_dcs": weight_data.get("total_dcs", 0),
+                            "successful_weights": weight_data.get("successful_weights", 0),
+                            "bg_metadata": weight_data.get("bg_metadata", {}),
+                            "bpp_processed_at": weight_data.get("processed_at"),
+                            "fetched_at": datetime.now(timezone.utc).isoformat()
+                        }
+
+                    # Remove from pending
+                    with pending_jobs_lock:
+                        pending_weight_jobs.discard(job_id)
+
+                    logger.info(f"Weights fetched and stored for job: {job_id}")
+                    logger.info(f"  - DCs with weights: {weight_data.get('successful_weights', 0)}/{weight_data.get('total_dcs', 0)}")
+
+            time.sleep(WEIGHT_POLL_INTERVAL)
+
+        except Exception as e:
+            logger.error(f"Error in weight polling worker: {e}")
+            time.sleep(WEIGHT_POLL_INTERVAL)
+
+
+def start_weight_polling():
+    """Start the background weight polling thread"""
+    worker_thread = Thread(target=weight_polling_worker, daemon=True)
+    worker_thread.start()
+    logger.info("Weight polling worker started")
+
+
+# =============================================================================
 # API ENDPOINTS
 # =============================================================================
 
 @app.route("/")
 def index():
     """API info endpoint"""
+    with weight_storage_lock:
+        weight_count = len(weight_storage)
+    with pending_jobs_lock:
+        pending_count = len(pending_weight_jobs)
+
     return jsonify({
         "service": "Beckn Application Platform (BAP)",
-        "version": "1.0.0",
+        "version": "2.0.0",
         "port": BAP_PORT,
         "endpoints": {
             "POST /task": "Submit a new compute task",
             "GET /task/<job_id>": "Get task status by job_id",
             "GET /tasks": "List recent tasks",
             "DELETE /task/<job_id>": "Cancel a task",
+            "GET /weights": "Get all stored weight assignments",
+            "GET /weights/<job_id>": "Get weights for specific task",
+            "GET /weights/pending": "Get list of jobs waiting for weights",
+            "GET /data-centres": "List available data centres",
+            "GET /grid-status": "Current grid status",
             "GET /health": "Health check"
         },
-        "database_connected": db_client is not None
+        "database_connected": db_client is not None,
+        "bpp_url": BPP_BASE_URL,
+        "weights_stored": weight_count,
+        "weights_pending": pending_count
     })
 
 
@@ -118,9 +233,17 @@ def health():
         except Exception:
             pass
 
+    with weight_storage_lock:
+        weight_count = len(weight_storage)
+    with pending_jobs_lock:
+        pending_count = len(pending_weight_jobs)
+
     return jsonify({
         "status": "healthy" if db_ok else "degraded",
         "database_connected": db_ok,
+        "bpp_url": BPP_BASE_URL,
+        "weights_stored": weight_count,
+        "weights_pending": pending_count,
         "timestamp": datetime.now(timezone.utc).isoformat()
     })
 
@@ -202,8 +325,19 @@ def submit_task():
             .execute()
 
         if result.data:
-            logger.info(f"Task submitted: {data['job_id']} (type={workload_type}, urgency={data.get('urgency', 'MEDIUM')})")
-            return jsonify({"success": True, "job_id": data["job_id"]})
+            job_id = data["job_id"]
+            logger.info(f"Task submitted: {job_id} (type={workload_type}, urgency={data.get('urgency', 'MEDIUM')})")
+
+            # Add to pending weights - BAP will poll BPP for this job's weights
+            with pending_jobs_lock:
+                pending_weight_jobs.add(job_id)
+            logger.info(f"Job {job_id} added to pending weights queue")
+
+            return jsonify({
+                "success": True,
+                "job_id": job_id,
+                "message": "Task submitted. Weights will be fetched from BPP when ready."
+            })
         else:
             logger.error(f"Failed to insert task: no data returned")
             return jsonify({"success": False, "error": "Insert failed"}), 500
@@ -369,10 +503,75 @@ def get_grid_status():
 
 
 # =============================================================================
+# WEIGHT ENDPOINTS
+# =============================================================================
+
+@app.route("/weights", methods=["GET"])
+def get_all_weights():
+    """Get all stored weight assignments"""
+    with weight_storage_lock:
+        return jsonify({
+            "success": True,
+            "total_jobs": len(weight_storage),
+            "data": weight_storage
+        })
+
+
+@app.route("/weights/pending", methods=["GET"])
+def get_pending_weights():
+    """Get list of jobs waiting for weights from BPP"""
+    with pending_jobs_lock:
+        pending_list = list(pending_weight_jobs)
+
+    return jsonify({
+        "success": True,
+        "pending_count": len(pending_list),
+        "pending_jobs": pending_list
+    })
+
+
+@app.route("/weights/<job_id>", methods=["GET"])
+def get_job_weights(job_id: str):
+    """Get weight assignments for a specific job"""
+    with weight_storage_lock:
+        if job_id not in weight_storage:
+            # Check if it's pending
+            with pending_jobs_lock:
+                if job_id in pending_weight_jobs:
+                    return jsonify({
+                        "success": False,
+                        "status": "pending",
+                        "message": f"Weights for {job_id} are still being processed"
+                    }), 202
+
+            return jsonify({
+                "success": False,
+                "error": f"No weights found for job {job_id}"
+            }), 404
+
+        return jsonify({
+            "success": True,
+            "job_id": job_id,
+            "data": weight_storage[job_id]
+        })
+
+
+# =============================================================================
 # MAIN
 # =============================================================================
 
 if __name__ == "__main__":
+    print("""
+    ╔═══════════════════════════════════════════════════════════════╗
+    ║        BECKN APPLICATION PLATFORM (BAP)                       ║
+    ║                                                               ║
+    ║   Frontend API for task submission                            ║
+    ║   Fetches and stores weight assignments from BPP              ║
+    ║                                                               ║
+    ║   Port: 5052                                                  ║
+    ╚═══════════════════════════════════════════════════════════════╝
+    """)
+
     logger.info("=" * 60)
     logger.info("Starting Beckn Application Platform (BAP)")
     logger.info("=" * 60)
@@ -383,6 +582,10 @@ if __name__ == "__main__":
     else:
         logger.error("Failed to connect to database - running in degraded mode")
 
+    # Start weight polling worker
+    start_weight_polling()
+
     # Start Flask server
     logger.info(f"Starting BAP on port {BAP_PORT}")
+    logger.info(f"BPP URL: {BPP_BASE_URL}")
     app.run(host=BAP_HOST, port=BAP_PORT, debug=False, threaded=True)
