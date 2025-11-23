@@ -373,7 +373,13 @@ class SupabaseClient:
             "workload_type": workload_type,
             "urgency": workload.get("urgency", "MEDIUM"),
             "required_gpu_mins": workload.get("required_gpu_mins"),
+            "required_cpu_cores": workload.get("required_cpu_cores"),
+            "required_memory_gb": workload.get("required_memory_gb"),
+            "estimated_energy_kwh": workload.get("estimated_energy_kwh"),
             "carbon_cap_gco2": workload.get("carbon_cap_gco2"),
+            "max_price_gbp": workload.get("max_price_gbp"),
+            "deadline": workload.get("deadline"),
+            "deferral_window_mins": workload.get("deferral_window_mins"),
             "status": workload.get("status", "PENDING"),
             "created_at": workload.get("created_at", datetime.now(timezone.utc).isoformat())
         }
@@ -416,7 +422,13 @@ class SupabaseClient:
                 "workload_type": workload_type,
                 "urgency": wl.get("urgency", "MEDIUM"),
                 "required_gpu_mins": wl.get("required_gpu_mins"),
+                "required_cpu_cores": wl.get("required_cpu_cores"),
+                "required_memory_gb": wl.get("required_memory_gb"),
+                "estimated_energy_kwh": wl.get("estimated_energy_kwh"),
                 "carbon_cap_gco2": wl.get("carbon_cap_gco2"),
+                "max_price_gbp": wl.get("max_price_gbp"),
+                "deadline": wl.get("deadline"),
+                "deferral_window_mins": wl.get("deferral_window_mins"),
                 "status": wl.get("status", "PENDING"),
                 "created_at": wl.get("created_at", datetime.now(timezone.utc).isoformat())
             }

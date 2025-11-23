@@ -50,7 +50,6 @@ class DegPipeline:
             persist_to_supabase: If True, write data to Supabase. If False, only keep in memory.
         """
         self.fetcher = GridDataFetcher()
-        self.dc_gen = DataCentreGenerator(n_dcs=8)
         self.persist_to_supabase = persist_to_supabase
 
         # Initialize Supabase client if persistence is enabled
@@ -63,6 +62,18 @@ class DegPipeline:
                 logger.error(f"Failed to initialize Supabase client: {e}")
                 self.persist_to_supabase = False
 
+        # Load existing data centres from database or create new ones
+        existing_dcs = None
+        if self.db:
+            try:
+                existing_dcs = self.db.get_all_data_centres()
+                if existing_dcs:
+                    logger.info(f"Loaded {len(existing_dcs)} existing data centres from database")
+            except Exception as e:
+                logger.warning(f"Could not load existing DCs: {e}")
+
+        self.dc_gen = DataCentreGenerator(n_dcs=48, existing_dcs=existing_dcs)
+
         # In-memory state (for API serving)
         self.current_state = {
             "objects": {},
@@ -70,13 +81,16 @@ class DegPipeline:
             "last_updated": None
         }
 
-    def run_pipeline(self) -> dict:
+    def run_pipeline(self, generate_workloads: bool = True) -> dict:
         """
         Execute the full data pipeline:
         1. Fetch real grid data from APIs
         2. Generate synthetic compute data
         3. Persist to Supabase
         4. Update in-memory state
+
+        Args:
+            generate_workloads: If False, skip batch workload generation (for scheduled single generation)
         """
         logger.info("--- Starting Pipeline Update ---")
         run_timestamp = datetime.now(timezone.utc).isoformat()
@@ -202,15 +216,19 @@ class DegPipeline:
             except Exception as e:
                 logger.error(f"Failed to persist data centres: {e}")
 
-        # Generate workloads based on grid stress
-        workloads = self.dc_gen.generate_workloads(dcs, current_stress)
+        # Generate workloads based on grid stress (if enabled)
+        workloads = []
+        if generate_workloads:
+            workloads = self.dc_gen.generate_workloads(dcs, current_stress)
 
-        # Persist workloads to Supabase
-        if self.persist_to_supabase and self.db and workloads:
-            try:
-                self.db.insert_workloads_batch(workloads)
-            except Exception as e:
-                logger.error(f"Failed to persist workloads: {e}")
+            # Persist workloads to Supabase
+            if self.persist_to_supabase and self.db and workloads:
+                try:
+                    self.db.insert_workloads_batch(workloads)
+                except Exception as e:
+                    logger.error(f"Failed to persist workloads: {e}")
+        else:
+            logger.info("Workload generation skipped (scheduled single generation mode)")
 
         # =================================================================
         # 6. ASSEMBLE IN-MEMORY ONTOLOGY STATE

@@ -328,7 +328,9 @@ CREATE TABLE IF NOT EXISTS orchestration_decisions (
         'SCALE_UP',              -- Increase DC load
         'NEGOTIATE',             -- Agent negotiation event
         'PRICE_OPTIMIZATION',    -- Cost-driven decision
-        'CARBON_OPTIMIZATION'    -- Carbon-driven decision
+        'CARBON_OPTIMIZATION',   -- Carbon-driven decision
+        'LLM_DC_SELECTION',      -- LLM-based DC selection recommendation
+        'LLM_PROCESSING_FAILED'  -- LLM processing failed for workload
     )),
 
     -- Participants
