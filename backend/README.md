@@ -42,7 +42,7 @@ In your Supabase SQL Editor, execute the following in order:
 
 ### 4. Run the System
 
-You need to run **two servers**:
+You need to run **three servers**:
 
 #### Terminal 1: Data Pipeline & API Server (Port 5000)
 
@@ -53,9 +53,9 @@ python api_server.py
 This server:
 - Runs the data pipeline immediately on startup
 - Fetches real grid data from Carbon Intensity API
-- Generates synthetic data centres and workloads
-- Persists everything to Supabase
-- Schedules updates every 30 minutes
+- Loads existing data centres from database (no duplicates on restart)
+- Schedules grid data updates every 30 minutes
+- Generates a single workload every 3 minutes (configurable)
 - Serves REST API endpoints
 
 #### Terminal 2: Beckn Gateway (Port 5050)
@@ -65,13 +65,30 @@ python BG.py
 ```
 
 This server:
+- Registers itself as an agent in Supabase on startup
 - Monitors `workload_notifications` table for new workloads
+- Tracks agent state transitions (IDLE → ACTIVE → EXECUTING → IDLE)
 - When a new workload is detected:
   1. Fetches latest grid signals, regional data, DC states, generation mix
   2. Packages into a `decision_context` dictionary
-  3. Calls Gemini LLM to generate n+1 JSON files (n per DC, 1 for task)
-  4. Broadcasts LLM output via `/beckn/llm-output` endpoint
+  3. Calls Gemini LLM (gemini-2.5-flash) to generate DC suitability scores
+  4. Logs orchestration decisions to immutable audit log
+  5. Broadcasts LLM output via `/beckn/llm-output` endpoint
 - BPP (Beckn Provider Platform) monitors this endpoint for processed tasks
+
+#### Terminal 3: Beckn Application Platform - BAP (Port 5052)
+
+```bash
+python BAP.py
+```
+
+This server:
+- Frontend-facing API for task submission
+- Receives tasks from web frontend via REST API
+- Persists tasks to Supabase (triggers BG processing automatically)
+- Provides endpoints for task status, listing, and cancellation
+- Includes grid status and data centre listing for frontend display
+- CORS-enabled for browser access
 
 ---
 
@@ -99,33 +116,42 @@ This server:
 │  │ grid_signals│  │   regions   │  │data_centres │  │workload_            │ │
 │  │ (time-series)│  │             │  │             │  │notifications        │ │
 │  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────────────┘ │
-│           │                                                    │            │
+│           │                                                    ▲            │
 │           │              TRIGGER fires on INSERT               │            │
 │           │         to compute_workloads table ────────────────┘            │
 └─────────────────────────────────────────────────────────────────────────────┘
-                                      │
-                          ┌───────────┴───────────┐
-                          ▼                       ▼
-┌─────────────────────────────────┐   ┌─────────────────────────────────────┐
-│   API SERVER (api_server.py)    │   │   BECKN GATEWAY (BG.py)             │
-│   Port: 5000                    │   │   Port: 5050                        │
-│                                 │   │                                     │
-│   /api/v1/live-state            │   │   Polls workload_notifications      │
-│   /api/v1/grid/regional         │   │   Builds decision_context           │
-│   /api/v1/market/catalog        │   │   Calls Gemini LLM                  │
-└─────────────────────────────────┘   │   Broadcasts to BPP                 │
-                                      │                                     │
-                                      │   /beckn/llm-output  ◄── BPP polls  │
-                                      │   /beckn/broadcast   ◄── SSE stream │
-                                      │   /beckn/catalog                    │
-                                      └─────────────────────────────────────┘
-                                                    │
-                                                    ▼
-                                      ┌─────────────────────────────────────┐
-                                      │         BPP (Provider Platform)     │
-                                      │   Receives LLM-processed DC options │
-                                      │   for workload scheduling           │
-                                      └─────────────────────────────────────┘
+              │                       │                       ▲
+              │           ┌───────────┴───────────┐           │
+              ▼           ▼                       ▼           │
+┌───────────────────────────────┐  ┌─────────────────────────────────────────┐
+│  API SERVER (api_server.py)   │  │      BECKN GATEWAY (BG.py)              │
+│  Port: 5000                   │  │      Port: 5050                         │
+│                               │  │                                         │
+│  /api/v1/live-state           │  │  • Registers as agent on startup        │
+│  /api/v1/grid/regional        │  │  • Polls workload_notifications         │
+│  /api/v1/market/catalog       │  │  • Builds decision_context              │
+│  /api/v1/workloads/generate   │  │  • Calls Gemini LLM (gemini-2.5-flash)  │
+└───────────────────────────────┘  │  • Logs decisions to audit table        │
+                                   │  • Tracks agent state (IDLE→ACTIVE→...)│
+                                   │                                         │
+                                   │  /beckn/llm-output  ◄── BPP polls       │
+                                   │  /beckn/agent       ◄── Agent status    │
+                                   └─────────────────────────────────────────┘
+                                                     │
+          ┌──────────────────────────────────────────┼──────────────────┐
+          │                                          │                  │
+          ▼                                          ▼                  ▼
+┌─────────────────────────────┐   ┌─────────────────────────────┐   ┌───────────┐
+│    BAP (BAP.py)             │   │    BPP (Provider Platform)  │   │  Frontend │
+│    Port: 5052               │   │    (Future)                 │   │  (Future) │
+│                             │   │                             │   │           │
+│  POST /task  ◄──────────────┼───┼─────────────────────────────┼───┤  Submit   │
+│  GET  /tasks                │   │  Receives LLM-processed     │   │  tasks    │
+│  GET  /task/<id>            │   │  DC options for scheduling  │   │           │
+│  DELETE /task/<id>          │   │                             │   │           │
+│  GET  /data-centres         │   │                             │   │           │
+│  GET  /grid-status          │   │                             │   │           │
+└─────────────────────────────┘   └─────────────────────────────┘   └───────────┘
 ```
 
 ---
@@ -160,13 +186,15 @@ This server:
 | `/api/v1/live-state` | GET | Full current ontology state (all objects + links) |
 | `/api/v1/grid/regional` | GET | Regional carbon intensities only |
 | `/api/v1/market/catalog` | GET | Available compute offerings |
+| `/api/v1/workloads/generate` | POST | Manually trigger workload generation |
+| `/api/v1/workloads/stats` | GET | Workload generation statistics |
 
 ### Beckn Gateway (Port 5050)
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/` | GET | Service info and all endpoints |
-| `/health` | GET | Health check with queue status |
+| `/health` | GET | Health check with agent status and queue info |
 | `/beckn/catalog` | GET | Current catalog of workloads |
 | `/beckn/broadcast` | GET | SSE stream for real-time broadcasts |
 | `/beckn/broadcast/poll` | GET | Polling endpoint for BPPs |
@@ -174,7 +202,21 @@ This server:
 | `/beckn/context/processed` | POST | Mark current task as processed |
 | `/beckn/llm-output` | GET | **Latest LLM output (BPP monitors this)** |
 | `/beckn/llm-output/history` | GET | Historical LLM outputs |
+| `/beckn/agent` | GET | Agent status and configuration |
 | `/beckn/search` | POST | Standard Beckn search endpoint |
+
+### Beckn Application Platform - BAP (Port 5052)
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/` | GET | Service info and available endpoints |
+| `/health` | GET | Health check with database status |
+| `/task` | POST | **Submit a new compute task** |
+| `/task/<job_id>` | GET | Get task status by job_id |
+| `/task/<job_id>` | DELETE | Cancel a task |
+| `/tasks` | GET | List recent tasks (supports `?limit=` and `?status=` filters) |
+| `/data-centres` | GET | List available data centres (sorted by carbon intensity) |
+| `/grid-status` | GET | Current grid signal and regional carbon ranking |
 
 ---
 
@@ -183,6 +225,7 @@ This server:
 ```
 backend/
 ├── api_server.py           # Flask API server (port 5000) with scheduler
+├── BAP.py                  # Beckn Application Platform (port 5052) - frontend API
 ├── BG.py                   # Beckn Gateway (port 5050) with LLM integration
 ├── data_fetchers.py        # External API integrations (Carbon Intensity, Grid ESO)
 ├── pipeline.py             # Main data pipeline orchestrator
@@ -192,8 +235,9 @@ backend/
 ├── .env                    # Environment variables (not in git)
 ├── README.md               # This documentation
 └── deprecated/
-    ├── supabase_schema.sql     # Database migration script
-    └── supabase_triggers.sql   # Trigger for workload notifications
+    ├── supabase_schema.sql       # Database migration script
+    ├── supabase_triggers.sql     # Trigger for workload notifications
+    └── cleanup_duplicate_dcs.sql # One-time script to remove duplicate DCs
 ```
 
 ---
@@ -309,10 +353,48 @@ When Gemini processes a decision_context, it outputs:
     "task_id": "JOB-12345",
     "generated_at": "2025-01-15T10:30:00Z",
     "dc_count": 8,
-    "model": "gemini-2.0-flash"
+    "model": "gemini-2.5-flash"
   }
 }
 ```
+
+---
+
+## Task Submission Format (BAP)
+
+When submitting a task via `POST /task` to BAP (port 5052):
+
+```json
+{
+  "job_id": "JOB-abc123",
+  "type": "Training_Run",
+  "urgency": "MEDIUM",
+  "host_dc_id": "DC-001",
+  "required_gpu_mins": 60,
+  "required_cpu_cores": 8,
+  "required_memory_gb": 32,
+  "estimated_energy_kwh": 5.0,
+  "carbon_cap_gco2": 100,
+  "max_price_gbp": 25.00,
+  "deadline": "2025-01-15T12:00:00Z",
+  "deferral_window_mins": 120
+}
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `job_id` | Yes | Unique job identifier (frontend generates) |
+| `type` | No | Workload type: `Training_Run`, `Inference_Batch`, `RAG_Query`, `Fine_Tuning`, `Data_Processing` |
+| `urgency` | No | Priority: `LOW`, `MEDIUM`, `HIGH`, `CRITICAL` (default: MEDIUM) |
+| `host_dc_id` | No | Preferred DC (optional - LLM will recommend if not provided) |
+| `required_gpu_mins` | No | GPU minutes required |
+| `required_cpu_cores` | No | CPU cores required |
+| `required_memory_gb` | No | Memory in GB |
+| `estimated_energy_kwh` | No | Estimated energy consumption |
+| `carbon_cap_gco2` | No | Maximum carbon intensity allowed |
+| `max_price_gbp` | No | Maximum price willing to pay |
+| `deadline` | No | Task deadline (ISO 8601) |
+| `deferral_window_mins` | No | How long task can be deferred |
 
 ---
 
@@ -363,6 +445,15 @@ When Gemini processes a decision_context, it outputs:
 
 ---
 
+## Completed Features
+
+- [x] Agent registration and state tracking (BG registers on startup)
+- [x] Orchestration decision audit logging (immutable log with LLM reasoning)
+- [x] Scheduled workload generation (single workload every 3 minutes)
+- [x] Data persistence without duplication (DCs loaded from DB on restart)
+- [x] BAP implementation for frontend task submission
+- [x] Google GenAI SDK integration (gemini-2.5-flash)
+
 ## Future Enhancements
 
 - [ ] Row Level Security for multi-tenancy
@@ -370,5 +461,6 @@ When Gemini processes a decision_context, it outputs:
 - [ ] WebSocket streaming for real-time updates
 - [ ] P415 flexibility market integration
 - [ ] Multi-agent negotiation protocols
-- [ ] Dashboard visualization
+- [ ] Dashboard visualization / Frontend UI
 - [ ] BPP implementation for DC selection and execution
+- [ ] Task execution and completion tracking
