@@ -1,34 +1,55 @@
 'use client'
 
-import Image from 'next/image'
-
 interface PylonLogoProps {
   variant?: 'dark' | 'light'
   size?: 'sm' | 'md' | 'lg' | 'xl'
+  showText?: boolean
 }
 
-export default function PylonLogo({ variant = 'dark', size = 'md' }: PylonLogoProps) {
+export default function PylonLogo({ variant = 'dark', size = 'md', showText = true }: PylonLogoProps) {
   const sizes = {
-    sm: { height: 28, gap: 'gap-2' },
-    md: { height: 36, gap: 'gap-2.5' },
-    lg: { height: 44, gap: 'gap-3' },
-    xl: { height: 56, gap: 'gap-4' },
+    sm: { icon: 28, text: 'text-lg', gap: 'gap-2' },
+    md: { icon: 36, text: 'text-xl', gap: 'gap-2.5' },
+    lg: { icon: 44, text: 'text-2xl', gap: 'gap-3' },
+    xl: { icon: 56, text: 'text-3xl', gap: 'gap-4' },
   }
 
-  const { height, gap } = sizes[size]
+  const { icon, text, gap } = sizes[size]
 
-  const logoSrc = variant === 'dark' ? '/assets/pylon-logo-dark.png' : '/assets/pylon-logo-light.png'
+  const isDark = variant === 'dark'
+  const bgColor = isDark ? 'bg-pylon-dark' : 'bg-white'
+  const iconColor = isDark ? '#ffffff' : '#0a0e1a'
+  const textColor = isDark ? 'text-pylon-dark' : 'text-white'
 
   return (
     <div className={`flex items-center ${gap}`}>
-      <Image
-        src={logoSrc}
-        alt="Pylon Logo"
-        width={height * 2.5}
-        height={height}
-        priority
-        className="object-contain"
-      />
+      {/* Logo Icon - Network/Pylon convergence symbol */}
+      <div
+        className={`${bgColor} rounded-lg flex items-center justify-center shadow-sm`}
+        style={{ width: icon, height: icon }}
+      >
+        <svg
+          viewBox="0 0 40 40"
+          fill="none"
+          xmlns="http://www.w3.org/2000/svg"
+          style={{ width: icon * 0.65, height: icon * 0.65 }}
+        >
+          {/* Central node */}
+          <circle cx="20" cy="12" r="4" fill={iconColor}/>
+          {/* Left branch */}
+          <line x1="20" y1="12" x2="9" y2="32" stroke={iconColor} strokeWidth="2.5" strokeLinecap="round"/>
+          <circle cx="9" cy="32" r="3" fill={iconColor}/>
+          {/* Right branch */}
+          <line x1="20" y1="12" x2="31" y2="32" stroke={iconColor} strokeWidth="2.5" strokeLinecap="round"/>
+          <circle cx="31" cy="32" r="3" fill={iconColor}/>
+          {/* Center stem */}
+          <line x1="20" y1="12" x2="20" y2="34" stroke={iconColor} strokeWidth="2.5" strokeLinecap="round"/>
+          <circle cx="20" cy="34" r="3" fill={iconColor}/>
+        </svg>
+      </div>
+      {showText && (
+        <span className={`font-semibold ${textColor} ${text} tracking-tight`}>Pylon</span>
+      )}
     </div>
   )
 }

@@ -38,14 +38,14 @@ export default function Header() {
             ))}
           </nav>
 
-          {/* Desktop Actions - User Dashboard Button */}
+          {/* Desktop Actions - Sign In Button */}
           <div className="hidden lg:flex items-center space-x-4">
             <Link
-              href="/user"
+              href="/signin"
               className="flex items-center gap-2 px-5 py-2.5 text-sm font-medium text-white bg-pylon-dark rounded hover:bg-pylon-dark/90 transition-colors"
             >
               <User className="w-4 h-4" />
-              User Dashboard
+              Sign In
             </Link>
             <button className="p-2 text-pylon-dark/60 hover:text-pylon-dark transition-colors">
               <Search className="w-5 h-5" />
@@ -80,12 +80,12 @@ export default function Header() {
               </Link>
             ))}
             <Link
-              href="/user"
+              href="/signin"
               className="inline-flex items-center gap-2 mt-4 px-6 py-3 text-sm font-medium text-white bg-pylon-dark rounded"
               onClick={() => setMobileMenuOpen(false)}
             >
               <User className="w-4 h-4" />
-              User Dashboard
+              Sign In
             </Link>
           </div>
         </div>
