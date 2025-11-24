@@ -1,0 +1,13 @@
+# Grid Data Pipeline Requirements
+# Python dependencies for the grid flexibility data pipeline
+
+# Core dependencies
+requests>=2.31.0
+python-dotenv>=1.0.0
+supabase>=2.0.0
+
+# Database
+psycopg2-binary>=2.9.9
+
+# Utilities
+python-dateutil>=2.8.2
