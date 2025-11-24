@@ -1,6 +1,7 @@
 'use client'
 
 import Link from 'next/link'
+import Image from 'next/image'
 import { User, Building2, ArrowRight } from 'lucide-react'
 
 export default function SignInPage() {
@@ -9,18 +10,14 @@ export default function SignInPage() {
       {/* Header with logo */}
       <div className="p-6 lg:p-8">
         <Link href="/" className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-pylon-dark rounded-lg flex items-center justify-center">
-            <svg viewBox="0 0 40 40" fill="none" className="w-6 h-6">
-              <circle cx="20" cy="12" r="3.5" fill="#ffffff"/>
-              <line x1="20" y1="12" x2="10" y2="30" stroke="#ffffff" strokeWidth="2.5" strokeLinecap="round"/>
-              <circle cx="10" cy="30" r="3" fill="#ffffff"/>
-              <line x1="20" y1="12" x2="30" y2="30" stroke="#ffffff" strokeWidth="2.5" strokeLinecap="round"/>
-              <circle cx="30" cy="30" r="3" fill="#ffffff"/>
-              <line x1="20" y1="12" x2="20" y2="32" stroke="#ffffff" strokeWidth="2.5" strokeLinecap="round"/>
-              <circle cx="20" cy="32" r="3" fill="#ffffff"/>
-            </svg>
-          </div>
-          <span className="text-pylon-dark font-semibold text-lg">Pylon</span>
+          <Image
+            src="/assets/Inverted.Pylon.Logo.png"
+            alt="Pylon Logo"
+            width={80}
+            height={80}
+            priority
+            className="h-4 w-auto"
+          />
         </Link>
       </div>
 

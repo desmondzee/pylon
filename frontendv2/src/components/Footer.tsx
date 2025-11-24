@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import PylonLogo from './PylonLogo'
+import Image from 'next/image'
 
 const footerLinks = {
   Platform: [
@@ -38,7 +38,14 @@ export default function Footer() {
         <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-8 lg:gap-12">
           {/* Logo column */}
           <div className="col-span-2 md:col-span-4 lg:col-span-1 mb-8 lg:mb-0">
-            <PylonLogo variant="light" size="md" />
+            <Image
+              src="/assets/Inverted.Pylon.Logo.png"
+              alt="Pylon Logo"
+              width={80}
+              height={80}
+              priority
+              className="h-4 w-auto"
+            />
             <p className="mt-4 text-sm text-white/60 max-w-xs">
               Intelligent orchestration for carbon-aware compute placement.
             </p>

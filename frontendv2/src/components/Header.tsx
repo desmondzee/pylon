@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
-import PylonLogo from './PylonLogo'
+import Image from 'next/image'
 import { Menu, X, Search, User } from 'lucide-react'
 
 const navItems = [
@@ -21,8 +21,15 @@ export default function Header() {
       <div className="container-wide">
         <div className="flex items-center justify-between h-16 lg:h-20">
           {/* Logo */}
-          <Link href="/" className="flex-shrink-0">
-            <PylonLogo variant="dark" size="md" />
+          <Link href="/" className="flex-shrink-0 flex items-center justify-center">
+            <Image
+              src="/assets/Inverted.Pylon.Logo.png"
+              alt="Pylon Main Logo"
+              width={900}
+              height={900}
+              priority
+              className="object-contain h-[224px] lg:h-[256px] w-auto"
+            />
           </Link>
 
           {/* Desktop Navigation */}

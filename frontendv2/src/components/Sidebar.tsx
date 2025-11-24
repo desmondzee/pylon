@@ -1,6 +1,7 @@
 'use client'
 
 import Link from 'next/link'
+import Image from 'next/image'
 import { usePathname } from 'next/navigation'
 import { Home, BarChart2, History, HelpCircle, Settings, ChevronRight } from 'lucide-react'
 import clsx from 'clsx'
@@ -32,19 +33,15 @@ export default function Sidebar({ collapsed = false }: SidebarProps) {
     >
       {/* Logo */}
       <div className={clsx('p-4 border-b border-white/10', collapsed ? 'px-3' : 'px-6')}>
-        <Link href="/" className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-white rounded-lg flex items-center justify-center flex-shrink-0">
-            <svg viewBox="0 0 40 40" fill="none" className="w-6 h-6">
-              <circle cx="20" cy="12" r="3.5" fill="#0a0e1a"/>
-              <line x1="20" y1="12" x2="10" y2="30" stroke="#0a0e1a" strokeWidth="2.5" strokeLinecap="round"/>
-              <circle cx="10" cy="30" r="3" fill="#0a0e1a"/>
-              <line x1="20" y1="12" x2="30" y2="30" stroke="#0a0e1a" strokeWidth="2.5" strokeLinecap="round"/>
-              <circle cx="30" cy="30" r="3" fill="#0a0e1a"/>
-              <line x1="20" y1="12" x2="20" y2="32" stroke="#0a0e1a" strokeWidth="2.5" strokeLinecap="round"/>
-              <circle cx="20" cy="32" r="3" fill="#0a0e1a"/>
-            </svg>
-          </div>
-          {!collapsed && <span className="text-white font-semibold text-lg">Pylon</span>}
+        <Link href="/" className="flex items-center justify-center">
+          <Image
+            src="/assets/pylon.logo.png"
+            alt="Pylon Logo"
+            width={140}
+            height={140}
+            priority
+            className="object-contain w-[140px] h-[140px]"
+          />
         </Link>
       </div>
 
