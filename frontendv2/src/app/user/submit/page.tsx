@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
-import { ChevronRight, Info, AlertCircle, CheckCircle2, Server, Zap, Clock, Leaf } from 'lucide-react'
+import { ChevronRight, Info, AlertCircle, CheckCircle2, Server, Zap, Clock, Leaf, TrendingDown, MapPin } from 'lucide-react'
 
 export default function SubmitWorkloadPage() {
   const [formData, setFormData] = useState({
@@ -25,9 +25,57 @@ export default function SubmitWorkloadPage() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    // In a real app, this would call an API
-    console.log('Submitting workload:', formData)
-    alert('Workload submitted successfully! (This is a demo)')
+
+    // Generate a unique workload ID
+    const workloadId = `WL-${Date.now().toString().slice(-6)}`
+    const jobId = `job_${new Date().getFullYear()}_${Math.random().toString(36).substring(2, 9)}`
+
+    // Create workload object
+    const newWorkload = {
+      id: workloadId,
+      job_id: jobId,
+      name: formData.workload_name,
+      workload_type: formData.workload_type,
+      region: formData.host_dc || 'Auto-select',
+      status: 'Queued',
+      carbon: 'Low',
+      urgency: formData.urgency,
+      required_gpu_mins: formData.required_gpu_mins,
+      required_cpu_cores: formData.required_cpu_cores,
+      required_memory_gb: formData.required_memory_gb,
+      estimated_energy_kwh: formData.estimated_energy_kwh,
+      carbon_cap_gco2: formData.carbon_cap_gco2,
+      max_price_gbp: formData.max_price_gbp,
+      deferral_window_mins: formData.deferral_window_mins,
+      deadline: formData.deadline,
+      is_deferrable: formData.is_deferrable,
+      submitted_at: new Date().toISOString(),
+    }
+
+    // Save to localStorage
+    const existingWorkloads = JSON.parse(localStorage.getItem('pylon_workloads') || '[]')
+    existingWorkloads.unshift(newWorkload) // Add to beginning
+    localStorage.setItem('pylon_workloads', JSON.stringify(existingWorkloads))
+
+    alert('Workload submitted successfully! Check your dashboard.')
+
+    // Reset form
+    setFormData({
+      workload_name: '',
+      workload_type: 'TRAINING_RUN',
+      urgency: 'MEDIUM',
+      host_dc: '',
+      required_gpu_mins: '',
+      required_cpu_cores: '',
+      required_memory_gb: '',
+      estimated_energy_kwh: '',
+      carbon_cap_gco2: '',
+      max_price_gbp: '',
+      deferral_window_mins: '120',
+      deadline: '',
+      is_deferrable: true,
+    })
+    setEstimatedCost(null)
   }
 
   const calculateEstimate = () => {
@@ -50,10 +98,29 @@ export default function SubmitWorkloadPage() {
         <p className="text-sm text-pylon-dark/60 mt-1">Deploy a new compute job with carbon-aware scheduling</p>
       </div>
 
+      {/* Info banner */}
+      <div className="bg-pylon-accent/5 border border-pylon-accent/20 rounded-lg p-4 flex items-start gap-3">
+        <Info className="w-5 h-5 text-pylon-accent flex-shrink-0 mt-0.5" />
+        <div>
+          <p className="text-sm font-medium text-pylon-dark mb-1">Carbon-Aware Scheduling Enabled</p>
+          <p className="text-xs text-pylon-dark/70">
+            Pylon will automatically optimize your workload placement based on real-time carbon intensity and cost data, potentially reducing emissions by up to 60%.
+          </p>
+        </div>
+      </div>
+
       <form onSubmit={handleSubmit} className="space-y-6">
         {/* Basic Information */}
-        <div className="bg-white rounded-lg border border-pylon-dark/5 p-6">
-          <h2 className="text-lg font-semibold text-pylon-dark mb-4">Basic Information</h2>
+        <div className="bg-white rounded-lg border border-pylon-dark/5 p-6 shadow-sm">
+          <div className="flex items-center gap-3 mb-6">
+            <div className="w-10 h-10 bg-pylon-dark/5 rounded-lg flex items-center justify-center">
+              <Server className="w-5 h-5 text-pylon-dark" />
+            </div>
+            <div>
+              <h2 className="text-lg font-semibold text-pylon-dark">Basic Information</h2>
+              <p className="text-xs text-pylon-dark/60">Workload identification and type</p>
+            </div>
+          </div>
 
           <div className="space-y-4">
             <div>
@@ -111,12 +178,14 @@ export default function SubmitWorkloadPage() {
         </div>
 
         {/* Resource Requirements */}
-        <div className="bg-white rounded-lg border border-pylon-dark/5 p-6">
-          <div className="flex items-start gap-3 mb-4">
-            <Server className="w-5 h-5 text-pylon-accent mt-0.5" />
+        <div className="bg-white rounded-lg border border-pylon-dark/5 p-6 shadow-sm">
+          <div className="flex items-start gap-3 mb-6">
+            <div className="w-10 h-10 bg-pylon-accent/10 rounded-lg flex items-center justify-center">
+              <Server className="w-5 h-5 text-pylon-accent" />
+            </div>
             <div>
               <h2 className="text-lg font-semibold text-pylon-dark">Resource Requirements</h2>
-              <p className="text-xs text-pylon-dark/60">Specify compute resources needed</p>
+              <p className="text-xs text-pylon-dark/60">Specify compute resources needed for optimal scheduling</p>
             </div>
           </div>
 
@@ -169,24 +238,25 @@ export default function SubmitWorkloadPage() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-pylon-dark mb-1">
+              <label className="flex items-center gap-2 text-sm font-medium text-pylon-dark mb-2">
+                <MapPin className="w-4 h-4 text-pylon-accent" />
                 Preferred Data Center
               </label>
               <select
                 value={formData.host_dc}
                 onChange={(e) => setFormData({...formData, host_dc: e.target.value})}
-                className="w-full px-4 py-2 border border-pylon-dark/10 rounded focus:outline-none focus:border-pylon-accent"
+                className="w-full px-4 py-2.5 border border-pylon-dark/10 rounded focus:outline-none focus:border-pylon-accent focus:ring-2 focus:ring-pylon-accent/10 transition-all"
               >
-                <option value="">Auto-select (Recommended)</option>
-                <option value="uk-west-01">UK-West-01 - Cardiff</option>
-                <option value="uk-north-01">UK-North-01 - Manchester</option>
-                <option value="uk-south-01">UK-South-01 - Southampton</option>
-                <option value="uk-east-01">UK-East-01 - Norwich</option>
+                <option value="">🎯 Auto-select (Recommended)</option>
+                <option value="uk-west-01">🏭 UK-West-01 - Cardiff</option>
+                <option value="uk-north-01">🏭 UK-North-01 - Manchester</option>
+                <option value="uk-south-01">🏭 UK-South-01 - Southampton</option>
+                <option value="uk-east-01">🏭 UK-East-01 - Norwich</option>
               </select>
-              <div className="flex items-start gap-2 mt-2 p-3 bg-pylon-accent/5 rounded-lg">
+              <div className="flex items-start gap-2 mt-3 p-4 bg-gradient-to-r from-pylon-accent/5 to-transparent rounded-lg border-l-4 border-pylon-accent">
                 <Info className="w-4 h-4 text-pylon-accent flex-shrink-0 mt-0.5" />
                 <p className="text-xs text-pylon-dark/70">
-                  Auto-select will choose the data center with the lowest carbon intensity and cost
+                  Auto-select uses AI to choose the optimal data center based on real-time carbon intensity, energy costs, and current load across our network
                 </p>
               </div>
             </div>
@@ -194,12 +264,14 @@ export default function SubmitWorkloadPage() {
         </div>
 
         {/* Energy & Carbon */}
-        <div className="bg-white rounded-lg border border-pylon-dark/5 p-6">
-          <div className="flex items-start gap-3 mb-4">
-            <Leaf className="w-5 h-5 text-pylon-accent mt-0.5" />
+        <div className="bg-white rounded-lg border border-pylon-dark/5 p-6 shadow-sm">
+          <div className="flex items-start gap-3 mb-6">
+            <div className="w-10 h-10 bg-pylon-accent/10 rounded-lg flex items-center justify-center">
+              <Leaf className="w-5 h-5 text-pylon-accent" />
+            </div>
             <div>
               <h2 className="text-lg font-semibold text-pylon-dark">Energy & Carbon Constraints</h2>
-              <p className="text-xs text-pylon-dark/60">Set energy and carbon limits</p>
+              <p className="text-xs text-pylon-dark/60">Define sustainability goals and cost limits</p>
             </div>
           </div>
 
@@ -270,29 +342,42 @@ export default function SubmitWorkloadPage() {
             </button>
 
             {estimatedCost !== null && (
-              <div className="p-4 bg-pylon-light border border-pylon-dark/10 rounded-lg">
-                <div className="flex items-start justify-between">
+              <div className="p-5 bg-gradient-to-br from-pylon-accent/10 to-pylon-accent/5 border border-pylon-accent/30 rounded-lg">
+                <div className="flex items-start justify-between mb-3">
                   <div>
-                    <p className="text-sm font-medium text-pylon-dark mb-1">Estimated Cost</p>
-                    <p className="text-2xl font-semibold text-pylon-accent">£{estimatedCost.toFixed(2)}</p>
+                    <p className="text-sm font-medium text-pylon-dark mb-1 flex items-center gap-2">
+                      <CheckCircle2 className="w-4 h-4 text-pylon-accent" />
+                      Estimated Cost
+                    </p>
+                    <p className="text-3xl font-semibold text-pylon-accent">£{estimatedCost.toFixed(2)}</p>
                   </div>
-                  <CheckCircle2 className="w-5 h-5 text-pylon-accent" />
+                  <div className="text-right">
+                    <p className="text-xs text-pylon-dark/60 mb-1">Potential Savings</p>
+                    <p className="text-lg font-semibold text-pylon-accent flex items-center gap-1">
+                      <TrendingDown className="w-4 h-4" />
+                      22%
+                    </p>
+                  </div>
                 </div>
-                <p className="text-xs text-pylon-dark/60 mt-2">
-                  Based on current UK grid carbon intensity and energy prices
-                </p>
+                <div className="pt-3 border-t border-pylon-accent/20">
+                  <p className="text-xs text-pylon-dark/70">
+                    Based on current UK grid carbon intensity and energy prices. Carbon-aware scheduling could save an additional 15-22% vs standard deployment.
+                  </p>
+                </div>
               </div>
             )}
           </div>
         </div>
 
         {/* Scheduling */}
-        <div className="bg-white rounded-lg border border-pylon-dark/5 p-6">
-          <div className="flex items-start gap-3 mb-4">
-            <Clock className="w-5 h-5 text-pylon-accent mt-0.5" />
+        <div className="bg-white rounded-lg border border-pylon-dark/5 p-6 shadow-sm">
+          <div className="flex items-start gap-3 mb-6">
+            <div className="w-10 h-10 bg-pylon-accent/10 rounded-lg flex items-center justify-center">
+              <Clock className="w-5 h-5 text-pylon-accent" />
+            </div>
             <div>
               <h2 className="text-lg font-semibold text-pylon-dark">Scheduling Options</h2>
-              <p className="text-xs text-pylon-dark/60">Define timing and flexibility</p>
+              <p className="text-xs text-pylon-dark/60">Define timing constraints and enable intelligent deferral</p>
             </div>
           </div>
 
@@ -327,40 +412,58 @@ export default function SubmitWorkloadPage() {
               </div>
             </div>
 
-            <div className="flex items-start gap-3 p-4 bg-pylon-light rounded-lg">
+            <div className="flex items-start gap-3 p-5 bg-gradient-to-r from-pylon-accent/10 via-pylon-accent/5 to-transparent rounded-lg border border-pylon-accent/20">
               <input
                 type="checkbox"
                 id="is_deferrable"
                 checked={formData.is_deferrable}
                 onChange={(e) => setFormData({...formData, is_deferrable: e.target.checked})}
-                className="mt-1"
+                className="mt-1 w-4 h-4 text-pylon-accent border-pylon-dark/20 rounded focus:ring-pylon-accent"
               />
-              <label htmlFor="is_deferrable" className="flex-1">
-                <span className="block text-sm font-medium text-pylon-dark mb-1">
-                  Allow Carbon-Aware Scheduling
+              <label htmlFor="is_deferrable" className="flex-1 cursor-pointer">
+                <span className="flex items-center gap-2 text-sm font-medium text-pylon-dark mb-2">
+                  <Leaf className="w-4 h-4 text-pylon-accent" />
+                  Enable Carbon-Aware Scheduling (Recommended)
                 </span>
-                <span className="text-xs text-pylon-dark/60">
-                  Pylon can defer this workload to periods of low carbon intensity, reducing emissions by up to 60%
+                <span className="text-xs text-pylon-dark/70 leading-relaxed">
+                  Pylon's AI will intelligently defer this workload to periods of low carbon intensity, potentially reducing emissions by up to 60% while maintaining your deadline requirements.
                 </span>
+                <div className="mt-3 pt-3 border-t border-pylon-accent/10 flex items-center gap-4 text-xs">
+                  <div className="flex items-center gap-1">
+                    <span className="w-2 h-2 rounded-full bg-pylon-accent"></span>
+                    <span className="text-pylon-dark/60">Up to 60% less CO₂</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <span className="w-2 h-2 rounded-full bg-pylon-accent"></span>
+                    <span className="text-pylon-dark/60">15-22% cost savings</span>
+                  </div>
+                </div>
               </label>
             </div>
           </div>
         </div>
 
         {/* Submit */}
-        <div className="flex items-center gap-4">
-          <button
-            type="submit"
-            className="px-6 py-3 text-sm font-medium text-white bg-pylon-dark rounded hover:bg-pylon-dark/90 transition-colors"
-          >
-            Submit Workload
-          </button>
-          <Link
-            href="/user"
-            className="px-6 py-3 text-sm font-medium text-pylon-dark bg-white border border-pylon-dark/10 rounded hover:bg-pylon-light transition-colors"
-          >
-            Cancel
-          </Link>
+        <div className="flex items-center justify-between p-6 bg-gradient-to-r from-pylon-light to-white rounded-lg border border-pylon-dark/10">
+          <div className="text-sm text-pylon-dark/70">
+            <p className="font-medium text-pylon-dark mb-1">Ready to submit?</p>
+            <p className="text-xs">Your workload will be queued and optimized for carbon efficiency</p>
+          </div>
+          <div className="flex items-center gap-3">
+            <Link
+              href="/user"
+              className="px-5 py-2.5 text-sm font-medium text-pylon-dark bg-white border border-pylon-dark/10 rounded hover:bg-pylon-light transition-colors"
+            >
+              Cancel
+            </Link>
+            <button
+              type="submit"
+              className="px-6 py-2.5 text-sm font-medium text-white bg-pylon-dark rounded hover:bg-pylon-dark/90 transition-all hover:shadow-lg flex items-center gap-2"
+            >
+              <CheckCircle2 className="w-4 h-4" />
+              Submit Workload
+            </button>
+          </div>
         </div>
       </form>
     </div>

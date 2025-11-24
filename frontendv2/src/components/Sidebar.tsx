@@ -37,10 +37,10 @@ export default function Sidebar({ collapsed = false }: SidebarProps) {
           <Image
             src="/assets/pylon.logo.png"
             alt="Pylon Logo"
-            width={140}
-            height={140}
+            width={120}
+            height={40}
             priority
-            className="object-contain w-[140px] h-[140px]"
+            className="h-10 w-auto object-contain"
           />
         </Link>
       </div>
@@ -49,7 +49,11 @@ export default function Sidebar({ collapsed = false }: SidebarProps) {
       <nav className="flex-1 py-6">
         <ul className="space-y-1 px-3">
           {mainNavItems.map((item) => {
-            const isActive = pathname === item.href || pathname?.startsWith(item.href + '/')
+            // Only highlight if exact match or if it's a sub-route of this specific item
+            // But prevent Home from matching everything
+            const isActive = item.href === '/user'
+              ? pathname === '/user'
+              : pathname?.startsWith(item.href)
             return (
               <li key={item.href}>
                 <Link

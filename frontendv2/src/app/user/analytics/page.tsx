@@ -1,9 +1,48 @@
 'use client'
 
+import { useState } from 'react'
 import Link from 'next/link'
 import { ChevronRight, TrendingUp, TrendingDown, Zap, Leaf, DollarSign, Clock, Download } from 'lucide-react'
 
+const periodData = {
+  '7 Days': {
+    energy: { value: 85, prev: 92, change: -8 },
+    carbon: { value: 8.2, change: -15 },
+    cost: { value: 645, prev: 724, change: -11 },
+    responseTime: { value: 38, prev: 42, change: -9 },
+    chartData: [65, 72, 58, 81, 69, 75, 63],
+    chartLabels: { start: '7 days ago', end: 'Today' },
+  },
+  '30 Days': {
+    energy: { value: 245, prev: 278, change: -12 },
+    carbon: { value: 24.5, change: -18 },
+    cost: { value: 2145, prev: 2524, change: -15 },
+    responseTime: { value: 42, prev: 39, change: 8 },
+    chartData: [65, 72, 58, 81, 69, 75, 63, 78, 71, 68, 74, 70, 67, 73, 69, 76, 72, 68, 74, 71, 69, 75, 70, 72, 68, 74, 71, 69, 73, 70],
+    chartLabels: { start: 'Jan 1', end: 'Jan 30' },
+  },
+  '90 Days': {
+    energy: { value: 820, prev: 945, change: -13 },
+    carbon: { value: 78.4, change: -21 },
+    cost: { value: 7240, prev: 8890, change: -19 },
+    responseTime: { value: 45, prev: 48, change: -6 },
+    chartData: Array.from({ length: 90 }, (_, i) => 50 + Math.sin(i / 5) * 20 + Math.random() * 10),
+    chartLabels: { start: '90 days ago', end: 'Today' },
+  },
+  'All Time': {
+    energy: { value: 2840, prev: 3200, change: -11 },
+    carbon: { value: 284.5, change: -16 },
+    cost: { value: 24560, prev: 29340, change: -16 },
+    responseTime: { value: 43, prev: 51, change: -16 },
+    chartData: Array.from({ length: 365 }, (_, i) => 50 + Math.sin(i / 20) * 25 + Math.random() * 15),
+    chartLabels: { start: 'Jan 2024', end: 'Today' },
+  },
+}
+
 export default function AnalyticsPage() {
+  const [selectedPeriod, setSelectedPeriod] = useState<keyof typeof periodData>('30 Days')
+  const data = periodData[selectedPeriod]
+
   return (
     <div className="space-y-6">
       {/* Page header */}
@@ -27,11 +66,12 @@ export default function AnalyticsPage() {
 
       {/* Time period selector */}
       <div className="flex gap-2">
-        {['7 Days', '30 Days', '90 Days', 'All Time'].map((period) => (
+        {(['7 Days', '30 Days', '90 Days', 'All Time'] as const).map((period) => (
           <button
             key={period}
+            onClick={() => setSelectedPeriod(period)}
             className={`px-4 py-2 text-sm font-medium rounded transition-colors ${
-              period === '30 Days'
+              period === selectedPeriod
                 ? 'bg-pylon-dark text-white'
                 : 'bg-white text-pylon-dark border border-pylon-dark/10 hover:bg-pylon-light'
             }`}
@@ -46,14 +86,14 @@ export default function AnalyticsPage() {
         <div className="bg-white rounded-lg border border-pylon-dark/5 p-6">
           <div className="flex items-center justify-between mb-4">
             <Zap className="w-8 h-8 text-pylon-accent" />
-            <div className="flex items-center gap-1 text-xs font-medium text-pylon-accent">
-              <TrendingDown className="w-3.5 h-3.5" />
-              12%
+            <div className={`flex items-center gap-1 text-xs font-medium ${data.energy.change < 0 ? 'text-pylon-accent' : 'text-red-500'}`}>
+              {data.energy.change < 0 ? <TrendingDown className="w-3.5 h-3.5" /> : <TrendingUp className="w-3.5 h-3.5" />}
+              {Math.abs(data.energy.change)}%
             </div>
           </div>
           <p className="text-sm text-pylon-dark/60 mb-1">Total Energy</p>
-          <p className="text-3xl font-semibold text-pylon-dark">245 kWh</p>
-          <p className="text-xs text-pylon-dark/60 mt-2">vs 278 kWh last month</p>
+          <p className="text-3xl font-semibold text-pylon-dark">{data.energy.value} kWh</p>
+          {data.energy.prev && <p className="text-xs text-pylon-dark/60 mt-2">vs {data.energy.prev} kWh last period</p>}
         </div>
 
         <div className="bg-white rounded-lg border border-pylon-dark/5 p-6">
@@ -61,11 +101,11 @@ export default function AnalyticsPage() {
             <Leaf className="w-8 h-8 text-pylon-accent" />
             <div className="flex items-center gap-1 text-xs font-medium text-pylon-accent">
               <TrendingDown className="w-3.5 h-3.5" />
-              18%
+              {Math.abs(data.carbon.change)}%
             </div>
           </div>
           <p className="text-sm text-pylon-dark/60 mb-1">Carbon Saved</p>
-          <p className="text-3xl font-semibold text-pylon-dark">24.5t</p>
+          <p className="text-3xl font-semibold text-pylon-dark">{data.carbon.value}t</p>
           <p className="text-xs text-pylon-dark/60 mt-2">vs baseline scheduling</p>
         </div>
 
@@ -74,25 +114,25 @@ export default function AnalyticsPage() {
             <DollarSign className="w-8 h-8 text-pylon-accent" />
             <div className="flex items-center gap-1 text-xs font-medium text-pylon-accent">
               <TrendingDown className="w-3.5 h-3.5" />
-              15%
+              {Math.abs(data.cost.change)}%
             </div>
           </div>
           <p className="text-sm text-pylon-dark/60 mb-1">Total Cost</p>
-          <p className="text-3xl font-semibold text-pylon-dark">£2,145</p>
-          <p className="text-xs text-pylon-dark/60 mt-2">vs £2,524 last month</p>
+          <p className="text-3xl font-semibold text-pylon-dark">£{data.cost.value.toLocaleString()}</p>
+          {data.cost.prev && <p className="text-xs text-pylon-dark/60 mt-2">vs £{data.cost.prev.toLocaleString()} last period</p>}
         </div>
 
         <div className="bg-white rounded-lg border border-pylon-dark/5 p-6">
           <div className="flex items-center justify-between mb-4">
             <Clock className="w-8 h-8 text-pylon-accent" />
-            <div className="flex items-center gap-1 text-xs font-medium text-red-500">
-              <TrendingUp className="w-3.5 h-3.5" />
-              8%
+            <div className={`flex items-center gap-1 text-xs font-medium ${data.responseTime.change < 0 ? 'text-pylon-accent' : 'text-red-500'}`}>
+              {data.responseTime.change < 0 ? <TrendingDown className="w-3.5 h-3.5" /> : <TrendingUp className="w-3.5 h-3.5" />}
+              {Math.abs(data.responseTime.change)}%
             </div>
           </div>
           <p className="text-sm text-pylon-dark/60 mb-1">Avg Response Time</p>
-          <p className="text-3xl font-semibold text-pylon-dark">42ms</p>
-          <p className="text-xs text-pylon-dark/60 mt-2">vs 39ms last month</p>
+          <p className="text-3xl font-semibold text-pylon-dark">{data.responseTime.value}ms</p>
+          {data.responseTime.prev && <p className="text-xs text-pylon-dark/60 mt-2">vs {data.responseTime.prev}ms last period</p>}
         </div>
       </div>
 
@@ -100,7 +140,7 @@ export default function AnalyticsPage() {
       <div className="bg-white rounded-lg border border-pylon-dark/5 p-6">
         <h2 className="text-lg font-semibold text-pylon-dark mb-6">Energy Consumption Over Time</h2>
         <div className="h-64 flex items-end justify-between gap-2">
-          {[65, 72, 58, 81, 69, 75, 63, 78, 71, 68, 74, 70, 67, 73, 69, 76, 72, 68, 74, 71, 69, 75, 70, 72, 68, 74, 71, 69, 73, 70].map((value, idx) => (
+          {data.chartData.map((value, idx) => (
             <div key={idx} className="flex-1 bg-pylon-accent/20 rounded-t hover:bg-pylon-accent transition-colors relative group" style={{ height: `${value}%` }}>
               <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 bg-pylon-dark text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
                 {(value * 10).toFixed(1)} kWh
@@ -109,8 +149,8 @@ export default function AnalyticsPage() {
           ))}
         </div>
         <div className="flex items-center justify-between mt-4 text-xs text-pylon-dark/60">
-          <span>Jan 1</span>
-          <span>Jan 30</span>
+          <span>{data.chartLabels.start}</span>
+          <span>{data.chartLabels.end}</span>
         </div>
       </div>
 

@@ -94,23 +94,50 @@ export default function CarbonMapPage() {
               className="w-full h-full"
               style={{ filter: 'drop-shadow(0 1px 2px rgb(0 0 0 / 0.05))' }}
             >
-              {/* UK outline (simplified) */}
+              {/* UK outline (more realistic shape) */}
               <path
-                d="M 250 50
-                   L 280 80 L 300 120 L 320 160
-                   L 340 200 L 360 250 L 380 300
-                   L 390 350 L 395 400 L 390 450
-                   L 380 500 L 360 540 L 340 570
-                   L 310 595 L 280 610 L 250 615
-                   L 220 610 L 190 595 L 160 570
-                   L 140 540 L 120 500 L 110 450
-                   L 105 400 L 110 350 L 120 300
-                   L 140 250 L 160 200 L 180 160
-                   L 200 120 L 220 80 Z"
-                fill="#f8fafc"
+                d="M 260 50
+                   Q 280 45 300 60
+                   L 320 90 L 340 120
+                   Q 355 150 360 180
+                   L 370 220 L 380 260
+                   L 385 290
+                   Q 390 320 385 350
+                   L 378 380 L 370 410
+                   Q 368 440 365 470
+                   L 355 510 L 340 545
+                   Q 325 570 305 585
+                   L 280 600 L 250 610
+                   Q 225 612 200 605
+                   L 175 590 L 155 570
+                   Q 140 545 130 515
+                   L 120 480 L 115 445
+                   Q 113 410 118 375
+                   L 125 340 L 135 305
+                   Q 145 270 160 235
+                   L 175 200 L 190 165
+                   Q 205 130 220 100
+                   L 235 70
+                   Q 245 55 260 50 Z
+
+                   M 180 100
+                   Q 165 110 160 125
+                   L 155 145
+                   Q 153 165 158 180
+                   L 165 195
+                   Q 172 208 180 215
+                   L 190 220
+                   Q 200 223 210 220
+                   L 220 215
+                   Q 228 208 230 195
+                   L 232 175
+                   Q 230 160 220 145
+                   L 205 125
+                   Q 195 112 180 100 Z"
+                fill="#f0f4f8"
                 stroke="#0a0e1a"
-                strokeWidth="2"
-                opacity="0.3"
+                strokeWidth="2.5"
+                opacity="0.4"
               />
 
               {/* Heat map circles (overlays) */}
@@ -140,8 +167,9 @@ export default function CarbonMapPage() {
               {dataCenters.map((dc) => (
                 <g
                   key={dc.id}
-                  className="cursor-pointer transition-transform hover:scale-110"
-                  onClick={() => setSelectedDC(dc.id)}
+                  className="cursor-pointer transition-all duration-300"
+                  onClick={() => setSelectedDC(selectedDC === dc.id ? null : dc.id)}
+                  style={{ transform: selectedDC === dc.id ? 'scale(1.2)' : 'scale(1)', transformOrigin: `${dc.x}px ${dc.y}px` }}
                 >
                   <circle
                     cx={dc.x}
@@ -149,15 +177,28 @@ export default function CarbonMapPage() {
                     r="12"
                     fill="#0a0e1a"
                     stroke="#10b981"
-                    strokeWidth="3"
-                    className={selectedDC === dc.id ? 'animate-pulse' : ''}
+                    strokeWidth={selectedDC === dc.id ? "4" : "3"}
+                    className="transition-all duration-300"
                   />
                   <circle
                     cx={dc.x}
                     cy={dc.y}
                     r="6"
                     fill="#10b981"
+                    className="transition-all duration-300"
                   />
+                  {selectedDC === dc.id && (
+                    <circle
+                      cx={dc.x}
+                      cy={dc.y}
+                      r="18"
+                      fill="none"
+                      stroke="#10b981"
+                      strokeWidth="2"
+                      opacity="0.5"
+                      className="animate-ping"
+                    />
+                  )}
 
                   {/* Label */}
                   <text
@@ -247,13 +288,6 @@ export default function CarbonMapPage() {
                   </div>
                 </div>
               </div>
-
-              <button
-                onClick={() => setSelectedDC(null)}
-                className="w-full mt-6 px-4 py-2 text-sm font-medium text-pylon-dark bg-pylon-light rounded hover:bg-pylon-dark/5 transition-colors"
-              >
-                Clear Selection
-              </button>
             </div>
           ) : (
             <div className="bg-white rounded-lg border border-pylon-dark/5 p-6 text-center">

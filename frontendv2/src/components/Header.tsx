@@ -21,14 +21,14 @@ export default function Header() {
       <div className="container-wide">
         <div className="flex items-center justify-between h-16 lg:h-20">
           {/* Logo */}
-          <Link href="/" className="flex-shrink-0 flex items-center justify-center">
+          <Link href="/" className="flex-shrink-0">
             <Image
               src="/assets/Inverted.Pylon.Logo.png"
-              alt="Pylon Main Logo"
-              width={900}
-              height={900}
+              alt="Pylon Logo"
+              width={120}
+              height={40}
               priority
-              className="object-contain h-[224px] lg:h-[256px] w-auto"
+              className="h-8 w-auto object-contain"
             />
           </Link>
 

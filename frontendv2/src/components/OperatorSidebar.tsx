@@ -29,10 +29,10 @@ export default function OperatorSidebar() {
           <Image
             src="/assets/pylon.logo.png"
             alt="Pylon Logo"
-            width={140}
-            height={140}
+            width={120}
+            height={40}
             priority
-            className="object-contain w-[140px] h-[140px]"
+            className="h-10 w-auto object-contain"
           />
         </Link>
       </div>

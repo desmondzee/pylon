@@ -9,14 +9,14 @@ export default function SignInPage() {
     <div className="min-h-screen bg-pylon-light flex flex-col">
       {/* Header with logo */}
       <div className="p-6 lg:p-8">
-        <Link href="/" className="flex items-center gap-3">
+        <Link href="/">
           <Image
             src="/assets/Inverted.Pylon.Logo.png"
             alt="Pylon Logo"
-            width={80}
-            height={80}
+            width={120}
+            height={40}
             priority
-            className="h-4 w-auto"
+            className="h-8 w-auto object-contain"
           />
         </Link>
       </div>
