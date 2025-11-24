@@ -2,14 +2,14 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { LayoutDashboard, Server, Activity, Users, HelpCircle, Settings, ChevronRight } from 'lucide-react'
+import { Home, ClipboardList, TrendingUp, History, HelpCircle, Settings, ChevronRight } from 'lucide-react'
 import clsx from 'clsx'
 
 const mainNavItems = [
-  { icon: LayoutDashboard, label: 'Dashboard', href: '/operator' },
-  { icon: Server, label: 'Data Centers', href: '/operator/centers' },
-  { icon: Activity, label: 'Grid Status', href: '/operator/grid' },
-  { icon: Users, label: 'Tenants', href: '/operator/tenants' },
+  { icon: Home, label: 'Home', href: '/operator' },
+  { icon: ClipboardList, label: 'Queues and Bookings', href: '/operator/queues' },
+  { icon: TrendingUp, label: 'Grid Forecasts', href: '/operator/forecasts' },
+  { icon: History, label: 'History', href: '/operator/history' },
 ]
 
 const bottomNavItems = [
