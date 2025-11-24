@@ -3,36 +3,28 @@
 import Link from 'next/link'
 import Image from 'next/image'
 import { usePathname } from 'next/navigation'
-import { Home, BarChart2, History, HelpCircle, Settings, ChevronRight } from 'lucide-react'
+import { Home, ClipboardList, BarChart2, History, HelpCircle, Settings, ChevronRight } from 'lucide-react'
 import clsx from 'clsx'
 
 const mainNavItems = [
-  { icon: Home, label: 'Home', href: '/user' },
-  { icon: BarChart2, label: 'Analytics', href: '/user/analytics' },
-  { icon: History, label: 'History', href: '/user/history' },
+  { icon: Home, label: 'Home', href: '/operator' },
+  { icon: ClipboardList, label: 'Workloads', href: '/operator/workloads' },
+  { icon: BarChart2, label: 'Analytics', href: '/operator/analytics' },
+  { icon: History, label: 'History', href: '/operator/history' },
 ]
 
 const bottomNavItems = [
-  { icon: HelpCircle, label: 'Help', href: '/user/help' },
-  { icon: Settings, label: 'Settings', href: '/user/settings' },
+  { icon: HelpCircle, label: 'Help', href: '/operator/help' },
+  { icon: Settings, label: 'Settings', href: '/operator/settings' },
 ]
 
-interface SidebarProps {
-  collapsed?: boolean
-}
-
-export default function Sidebar({ collapsed = false }: SidebarProps) {
+export default function OperatorSidebar() {
   const pathname = usePathname()
 
   return (
-    <aside
-      className={clsx(
-        'fixed left-0 top-0 h-screen bg-pylon-dark flex flex-col z-40 transition-all duration-300',
-        collapsed ? 'w-16' : 'w-64'
-      )}
-    >
+    <aside className="fixed left-0 top-0 h-screen w-64 bg-pylon-dark flex flex-col z-40">
       {/* Logo */}
-      <div className={clsx('p-4 border-b border-white/10', collapsed ? 'px-3' : 'px-6')}>
+      <div className="p-4 px-6 border-b border-white/10">
         <Link href="/" className="flex items-center justify-center">
           <Image
             src="/assets/pylon.logo.png"
@@ -49,11 +41,7 @@ export default function Sidebar({ collapsed = false }: SidebarProps) {
       <nav className="flex-1 py-6">
         <ul className="space-y-1 px-3">
           {mainNavItems.map((item) => {
-            // Only highlight if exact match or if it's a sub-route of this specific item
-            // But prevent Home from matching everything
-            const isActive = item.href === '/user'
-              ? pathname === '/user'
-              : pathname?.startsWith(item.href)
+            const isActive = pathname === item.href || (pathname?.startsWith(item.href + '/') && item.href !== '/operator')
             return (
               <li key={item.href}>
                 <Link
@@ -66,10 +54,8 @@ export default function Sidebar({ collapsed = false }: SidebarProps) {
                   )}
                 >
                   <item.icon className="w-5 h-5 flex-shrink-0" />
-                  {!collapsed && <span className="text-sm font-medium">{item.label}</span>}
-                  {!collapsed && isActive && (
-                    <ChevronRight className="w-4 h-4 ml-auto" />
-                  )}
+                  <span className="text-sm font-medium">{item.label}</span>
+                  {isActive && <ChevronRight className="w-4 h-4 ml-auto" />}
                 </Link>
               </li>
             )
@@ -94,7 +80,7 @@ export default function Sidebar({ collapsed = false }: SidebarProps) {
                   )}
                 >
                   <item.icon className="w-5 h-5 flex-shrink-0" />
-                  {!collapsed && <span className="text-sm font-medium">{item.label}</span>}
+                  <span className="text-sm font-medium">{item.label}</span>
                 </Link>
               </li>
             )
