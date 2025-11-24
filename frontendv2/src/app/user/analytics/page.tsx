@@ -139,19 +139,35 @@ export default function AnalyticsPage() {
       {/* Energy consumption over time */}
       <div className="bg-white rounded-lg border border-pylon-dark/5 p-6">
         <h2 className="text-lg font-semibold text-pylon-dark mb-6">Energy Consumption Over Time</h2>
-        <div className="h-64 flex items-end justify-between gap-2">
-          {data.chartData.map((value, idx) => (
-            <div key={idx} className="flex-1 bg-pylon-accent/20 rounded-t hover:bg-pylon-accent transition-colors relative group" style={{ height: `${value}%` }}>
-              <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 bg-pylon-dark text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
-                {(value * 10).toFixed(1)} kWh
-              </div>
+        {selectedPeriod === 'All Time' ? (
+          <div className="h-64 flex items-center justify-center">
+            <p className="text-sm text-pylon-dark/60">Chart view not available for All Time period. Use a specific time range for detailed visualization.</p>
+          </div>
+        ) : (
+          <>
+            <div className="h-64 flex items-end justify-between gap-1 overflow-hidden">
+              {data.chartData.map((value, idx) => {
+                const maxValue = Math.max(...data.chartData)
+                const normalizedHeight = Math.min((value / maxValue) * 100, 100)
+                return (
+                  <div
+                    key={idx}
+                    className="flex-1 bg-pylon-accent/20 rounded-t hover:bg-pylon-accent transition-colors relative group min-w-[2px]"
+                    style={{ height: `${normalizedHeight}%`, maxHeight: '100%' }}
+                  >
+                    <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 bg-pylon-dark text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10">
+                      {(value * 10).toFixed(1)} kWh
+                    </div>
+                  </div>
+                )
+              })}
             </div>
-          ))}
-        </div>
-        <div className="flex items-center justify-between mt-4 text-xs text-pylon-dark/60">
-          <span>{data.chartLabels.start}</span>
-          <span>{data.chartLabels.end}</span>
-        </div>
+            <div className="flex items-center justify-between mt-4 text-xs text-pylon-dark/60">
+              <span>{data.chartLabels.start}</span>
+              <span>{data.chartLabels.end}</span>
+            </div>
+          </>
+        )}
       </div>
 
       {/* Carbon intensity vs workload timing */}

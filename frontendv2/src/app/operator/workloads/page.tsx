@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
-import { Server, Search, Filter, Download, ChevronRight, Zap, Clock, Leaf, AlertCircle, Pause, Play, XCircle, User } from 'lucide-react'
+import { Server, Search, Filter, Download, ChevronRight, Zap, Clock, Leaf, AlertCircle, Pause, Play, XCircle, User, Trash2 } from 'lucide-react'
 
 // Mock workloads from all users
 const allWorkloads = [
@@ -118,23 +118,64 @@ const workloadTypeLabels: Record<string, string> = {
 }
 
 export default function OperatorWorkloadsPage() {
+  const [workloads, setWorkloads] = useState(allWorkloads)
   const [filter, setFilter] = useState('all')
   const [searchQuery, setSearchQuery] = useState('')
   const [userFilter, setUserFilter] = useState('all')
 
-  const filteredWorkloads = allWorkloads.filter(w => {
+  const filteredWorkloads = workloads.filter(w => {
     if (filter !== 'all' && w.status !== filter) return false
     if (userFilter !== 'all' && w.user !== userFilter) return false
     if (searchQuery && !w.workload_name.toLowerCase().includes(searchQuery.toLowerCase()) && !w.job_id.toLowerCase().includes(searchQuery.toLowerCase())) return false
     return true
   })
 
-  const uniqueUsers = Array.from(new Set(allWorkloads.map(w => w.user)))
+  const uniqueUsers = Array.from(new Set(workloads.map(w => w.user)))
 
-  const handleAdminAction = (workloadId: string, action: 'pause' | 'resume' | 'cancel' | 'prioritize') => {
+  const handleAdminAction = (workloadId: string, action: 'pause' | 'resume' | 'cancel' | 'prioritize' | 'delete') => {
     if (confirm(`Are you sure you want to ${action} this workload? This will affect the user's job.`)) {
-      alert(`Workload ${workloadId} ${action}d successfully.`)
+      if (action === 'delete') {
+        setWorkloads(workloads.filter(w => w.id !== workloadId))
+        alert(`Workload ${workloadId} deleted successfully.`)
+      } else {
+        setWorkloads(workloads.map(w => 
+          w.id === workloadId 
+            ? { ...w, status: action === 'pause' ? 'PAUSED' : action === 'cancel' ? 'CANCELLED' : w.status }
+            : w
+        ))
+        alert(`Workload ${workloadId} ${action}d successfully.`)
+      }
     }
+  }
+
+  const handleExport = () => {
+    const csvHeaders = ['ID', 'Job ID', 'Workload Name', 'User', 'Type', 'Status', 'Urgency', 'Region', 'Energy (kWh)', 'Carbon (g CO₂)', 'Cost (£)', 'Created At']
+    const csvRows = filteredWorkloads.map(w => [
+      w.id,
+      w.job_id,
+      w.workload_name,
+      w.user,
+      w.workload_type,
+      w.status,
+      w.urgency,
+      w.region,
+      w.estimated_energy_kwh,
+      w.actual_carbon_gco2 || w.carbon_cap_gco2,
+      w.actual_cost_gbp || w.max_price_gbp,
+      w.created_at,
+    ])
+    
+    const csvContent = [csvHeaders, ...csvRows]
+      .map(row => row.map(cell => `"${cell}"`).join(','))
+      .join('\n')
+    
+    const blob = new Blob([csvContent], { type: 'text/csv' })
+    const url = window.URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `operator_workloads_${new Date().toISOString().split('T')[0]}.csv`
+    a.click()
+    window.URL.revokeObjectURL(url)
   }
 
   return (
@@ -222,7 +263,10 @@ export default function OperatorWorkloadsPage() {
           </div>
 
           {/* Export */}
-          <button className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-pylon-dark bg-white border border-pylon-dark/10 rounded hover:bg-pylon-light transition-colors">
+          <button
+            onClick={handleExport}
+            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-pylon-dark bg-white border border-pylon-dark/10 rounded hover:bg-pylon-light transition-colors"
+          >
             <Download className="w-4 h-4" />
             Export
           </button>
@@ -231,7 +275,7 @@ export default function OperatorWorkloadsPage() {
 
       {/* Results count */}
       <div className="text-sm text-pylon-dark/60">
-        Showing {filteredWorkloads.length} of {allWorkloads.length} workloads
+        Showing {filteredWorkloads.length} of {workloads.length} workloads
       </div>
 
       {/* Workloads list */}
@@ -382,7 +426,7 @@ export default function OperatorWorkloadsPage() {
                     </button>
                   </>
                 )}
-                {workload.status !== 'COMPLETED' && workload.status !== 'Cancelled' && (
+                {workload.status !== 'COMPLETED' && workload.status !== 'CANCELLED' && (
                   <button
                     onClick={() => handleAdminAction(workload.id, 'cancel')}
                     className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-600 bg-white border border-red-200 rounded hover:bg-red-50 transition-colors"
@@ -391,6 +435,14 @@ export default function OperatorWorkloadsPage() {
                     Cancel
                   </button>
                 )}
+                <button
+                  onClick={() => handleAdminAction(workload.id, 'delete')}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-600 bg-white border border-red-200 rounded hover:bg-red-50 transition-colors"
+                  title="Delete workload"
+                >
+                  <Trash2 className="w-3 h-3" />
+                  Delete
+                </button>
               </div>
             </div>
           </div>

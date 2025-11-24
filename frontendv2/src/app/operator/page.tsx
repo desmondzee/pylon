@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
-import { ArrowUpRight, ArrowDownRight, Zap, Leaf, Clock, Server, Users, BarChart3, AlertTriangle, Pause, Play, XCircle } from 'lucide-react'
+import { ArrowUpRight, ArrowDownRight, Zap, Leaf, Clock, Server, Users, BarChart3, AlertTriangle, Pause, Play, XCircle, Trash2 } from 'lucide-react'
 
 // Mock organization-wide stats
 const orgStats = [
@@ -64,15 +64,35 @@ export default function OperatorDashboard() {
     }
   }, [])
 
-  const handleIntervene = (workloadId: string, action: 'pause' | 'cancel') => {
+  const handleIntervene = (workloadId: string, action: 'pause' | 'cancel' | 'delete') => {
     if (confirm(`Are you sure you want to ${action} this workload? This action will affect the user's job.`)) {
-      alert(`Workload ${workloadId} ${action === 'pause' ? 'paused' : 'cancelled'} successfully.`)
-      // In a real app, this would update the workload status
-      setWorkloads(workloads.map(w => 
-        w.id === workloadId 
-          ? { ...w, status: action === 'pause' ? 'Paused' : 'Cancelled' }
-          : w
-      ))
+      if (action === 'delete') {
+        setWorkloads(workloads.filter(w => w.id !== workloadId))
+        alert(`Workload ${workloadId} deleted successfully.`)
+      } else {
+        setWorkloads(workloads.map(w => 
+          w.id === workloadId 
+            ? { ...w, status: action === 'pause' ? 'Paused' : 'Cancelled' }
+            : w
+        ))
+        alert(`Workload ${workloadId} ${action === 'pause' ? 'paused' : 'cancelled'} successfully.`)
+      }
+    }
+  }
+
+  const handleClearAllJobs = () => {
+    if (confirm('Are you sure you want to clear all organization workloads? This cannot be undone and will affect all users.')) {
+      // Clear all workload data from localStorage
+      for (let i = localStorage.length - 1; i >= 0; i--) {
+        const key = localStorage.key(i)
+        if (key && (key.startsWith('pylon_workloads') || key === 'pylon_workloads')) {
+          localStorage.removeItem(key)
+        }
+      }
+      setWorkloads(allUsersWorkloads)
+      alert('All organization workloads cleared!')
+      // Force a refresh to show updated state
+      window.location.reload()
     }
   }
 
@@ -85,6 +105,13 @@ export default function OperatorDashboard() {
           <p className="text-sm text-pylon-dark/60 mt-1">Administrative overview of all organization workloads and users.</p>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            onClick={handleClearAllJobs}
+            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-red-600 bg-white border border-red-200 rounded hover:bg-red-50 transition-colors"
+          >
+            <Trash2 className="w-4 h-4" />
+            Clear All Jobs
+          </button>
           <Link href="/operator/analytics" className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-pylon-dark bg-white border border-pylon-dark/10 rounded hover:bg-pylon-light transition-colors">
             <BarChart3 className="w-4 h-4" />
             View Analytics
@@ -199,6 +226,13 @@ export default function OperatorDashboard() {
                             <XCircle className="w-4 h-4" />
                           </button>
                         )}
+                        <button
+                          onClick={() => handleIntervene(workload.id, 'delete')}
+                          className="p-1.5 text-pylon-dark/60 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                          title="Delete workload"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
                       </div>
                     </td>
                   </tr>

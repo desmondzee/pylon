@@ -25,10 +25,10 @@ export default function Header() {
             <Image
               src="/assets/Inverted.Pylon.Logo.png"
               alt="Pylon Logo"
-              width={120}
-              height={40}
+              width={180}
+              height={60}
               priority
-              className="h-8 w-auto object-contain"
+              className="h-12 w-auto object-contain"
             />
           </Link>
 

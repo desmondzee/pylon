@@ -59,8 +59,17 @@ export default function UserDashboard() {
   const handleClearJobs = () => {
     if (confirm('Are you sure you want to clear all workloads? This cannot be undone.')) {
       localStorage.removeItem('pylon_workloads')
+      // Also clear any user-specific workload keys
+      for (let i = localStorage.length - 1; i >= 0; i--) {
+        const key = localStorage.key(i)
+        if (key && key.startsWith('pylon_workloads')) {
+          localStorage.removeItem(key)
+        }
+      }
       setRecentWorkloads(defaultWorkloads)
       alert('All workloads cleared!')
+      // Force a refresh to show updated state
+      window.location.reload()
     }
   }
 
