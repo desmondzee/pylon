@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import { ArrowUpRight, ArrowDownRight, Zap, Leaf, Clock, Server, Plus, Upload, BarChart3 } from 'lucide-react'
 
 const stats = [
@@ -50,14 +51,14 @@ export default function UserDashboard() {
           <p className="text-sm text-pylon-dark/60 mt-1">Welcome back. Here's your compute overview.</p>
         </div>
         <div className="flex items-center gap-2">
-          <button className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-pylon-dark bg-white border border-pylon-dark/10 rounded hover:bg-pylon-light transition-colors">
+          <Link href="/user/analytics" className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-pylon-dark bg-white border border-pylon-dark/10 rounded hover:bg-pylon-light transition-colors">
             <BarChart3 className="w-4 h-4" />
             View Reports
-          </button>
-          <button className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-pylon-dark rounded hover:bg-pylon-dark/90 transition-colors">
+          </Link>
+          <Link href="/user/submit" className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-pylon-dark rounded hover:bg-pylon-dark/90 transition-colors">
             <Plus className="w-4 h-4" />
             New Workload
-          </button>
+          </Link>
         </div>
       </div>
 
@@ -93,8 +94,11 @@ export default function UserDashboard() {
       <div className="grid lg:grid-cols-3 gap-6">
         {/* Recent workloads */}
         <div className="lg:col-span-2 bg-white rounded-lg border border-pylon-dark/5">
-          <div className="p-6 border-b border-pylon-dark/5">
+          <div className="p-6 border-b border-pylon-dark/5 flex items-center justify-between">
             <h2 className="text-lg font-semibold text-pylon-dark">Recent Workloads</h2>
+            <Link href="/user/workloads" className="text-sm text-pylon-accent font-medium hover:underline">
+              View all
+            </Link>
           </div>
           <div className="p-6">
             <table className="w-full">
@@ -145,9 +149,14 @@ export default function UserDashboard() {
 
         {/* Carbon intensity chart placeholder */}
         <div className="bg-white rounded-lg border border-pylon-dark/5">
-          <div className="p-6 border-b border-pylon-dark/5">
-            <h2 className="text-lg font-semibold text-pylon-dark">Carbon Intensity</h2>
-            <p className="text-xs text-pylon-dark/40 mt-1">Current UK grid status</p>
+          <div className="p-6 border-b border-pylon-dark/5 flex items-center justify-between">
+            <div>
+              <h2 className="text-lg font-semibold text-pylon-dark">Carbon Intensity</h2>
+              <p className="text-xs text-pylon-dark/40 mt-1">Current UK grid status</p>
+            </div>
+            <Link href="/user/carbon-map" className="text-sm text-pylon-accent font-medium hover:underline">
+              View map
+            </Link>
           </div>
           <div className="p-6">
             {/* Mini chart visualization */}
@@ -181,7 +190,7 @@ export default function UserDashboard() {
             <div className="mt-6 pt-4 border-t border-pylon-dark/5">
               <div className="flex items-center justify-between text-xs">
                 <span className="text-pylon-dark/40">Updated 2 mins ago</span>
-                <button className="text-pylon-accent font-medium hover:underline">View details</button>
+                <Link href="/user/carbon-map" className="text-pylon-accent font-medium hover:underline">View map</Link>
               </div>
             </div>
           </div>
@@ -194,7 +203,7 @@ export default function UserDashboard() {
         <div className="bg-white rounded-lg border border-pylon-dark/5 p-6">
           <h2 className="text-lg font-semibold text-pylon-dark mb-4">Quick Actions</h2>
           <div className="space-y-3">
-            <button className="w-full flex items-center gap-4 p-4 bg-pylon-light rounded-lg hover:bg-pylon-accent/10 transition-colors group">
+            <Link href="/user/submit" className="w-full flex items-center gap-4 p-4 bg-pylon-light rounded-lg hover:bg-pylon-accent/10 transition-colors group">
               <div className="w-10 h-10 bg-white rounded-lg flex items-center justify-center group-hover:bg-pylon-accent/20 transition-colors">
                 <Plus className="w-5 h-5 text-pylon-dark group-hover:text-pylon-accent transition-colors" />
               </div>
@@ -203,8 +212,8 @@ export default function UserDashboard() {
                 <p className="text-xs text-pylon-dark/60">Deploy a new compute job</p>
               </div>
               <ArrowUpRight className="w-5 h-5 text-pylon-dark/40 group-hover:text-pylon-accent transition-colors" />
-            </button>
-            <button className="w-full flex items-center gap-4 p-4 bg-pylon-light rounded-lg hover:bg-pylon-accent/10 transition-colors group">
+            </Link>
+            <Link href="/user/batch-upload" className="w-full flex items-center gap-4 p-4 bg-pylon-light rounded-lg hover:bg-pylon-accent/10 transition-colors group">
               <div className="w-10 h-10 bg-white rounded-lg flex items-center justify-center group-hover:bg-pylon-accent/20 transition-colors">
                 <Upload className="w-5 h-5 text-pylon-dark group-hover:text-pylon-accent transition-colors" />
               </div>
@@ -213,8 +222,8 @@ export default function UserDashboard() {
                 <p className="text-xs text-pylon-dark/60">Upload multiple workloads</p>
               </div>
               <ArrowUpRight className="w-5 h-5 text-pylon-dark/40 group-hover:text-pylon-accent transition-colors" />
-            </button>
-            <button className="w-full flex items-center gap-4 p-4 bg-pylon-light rounded-lg hover:bg-pylon-accent/10 transition-colors group">
+            </Link>
+            <Link href="/user/analytics" className="w-full flex items-center gap-4 p-4 bg-pylon-light rounded-lg hover:bg-pylon-accent/10 transition-colors group">
               <div className="w-10 h-10 bg-white rounded-lg flex items-center justify-center group-hover:bg-pylon-accent/20 transition-colors">
                 <BarChart3 className="w-5 h-5 text-pylon-dark group-hover:text-pylon-accent transition-colors" />
               </div>
@@ -223,7 +232,7 @@ export default function UserDashboard() {
                 <p className="text-xs text-pylon-dark/60">Detailed performance reports</p>
               </div>
               <ArrowUpRight className="w-5 h-5 text-pylon-dark/40 group-hover:text-pylon-accent transition-colors" />
-            </button>
+            </Link>
           </div>
         </div>
 
