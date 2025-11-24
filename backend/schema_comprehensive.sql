@@ -238,18 +238,23 @@ COMMENT ON TABLE demand_regional IS 'Regional electricity demand (forecast and a
 
 -- TABLE: wholesale_prices
 -- Wholesale electricity prices (£/MWh)
+-- Can be national (region_id NULL) or regional (region_id set)
 CREATE TABLE IF NOT EXISTS wholesale_prices (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    timestamp TIMESTAMP WITH TIME ZONE NOT NULL UNIQUE,
+    timestamp TIMESTAMP WITH TIME ZONE NOT NULL,
+    region_id UUID REFERENCES uk_regions(id) ON DELETE CASCADE,
     price_gbp_mwh DECIMAL(10, 2) NOT NULL,
-    price_type VARCHAR(50), -- 'day_ahead', 'imbalance', 'system_price'
+    price_type VARCHAR(50), -- 'day_ahead', 'imbalance', 'system_price', 'regional_estimate'
     settlement_period INTEGER,
     data_source VARCHAR(50) DEFAULT 'elexon_bmrs',
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    CONSTRAINT unique_wholesale_price UNIQUE (timestamp, region_id)
 );
 
-COMMENT ON TABLE wholesale_prices IS 'Wholesale electricity prices from BMRS/Elexon';
+COMMENT ON TABLE wholesale_prices IS 'Wholesale electricity prices from BMRS/Elexon (national and regional)';
 COMMENT ON COLUMN wholesale_prices.settlement_period IS 'Half-hourly settlement period (1-48)';
+COMMENT ON COLUMN wholesale_prices.region_id IS 'NULL for national prices, set for regional prices';
+COMMENT ON COLUMN wholesale_prices.price_type IS 'regional_estimate = derived from national price using regional factors';
 
 -- TABLE: flexibility_prices
 -- P415 flexibility market prices

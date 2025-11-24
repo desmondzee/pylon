@@ -265,6 +265,139 @@ class ComprehensiveEnergyPipeline:
         logger.info(f"Stored {stored_count} demand forecast records")
         return stored_count
 
+    def store_demand_actual(self, data: List[Dict]) -> int:
+        """Store actual demand data"""
+        if not data:
+            return 0
+
+        stored_count = 0
+        for record in data:
+            try:
+                self.supabase.table("demand_actual_national").upsert({
+                    'timestamp': record['timestamp'],
+                    'demand_mw': record['demand_mw'],
+                    'data_source': record.get('data_source', 'neso_api')
+                }, on_conflict='timestamp').execute()
+
+                stored_count += 1
+
+            except Exception as e:
+                logger.warning(f"Failed to store actual demand: {e}")
+
+        logger.info(f"Stored {stored_count} actual demand records")
+        return stored_count
+
+    def store_wholesale_prices(self, data: List[Dict]) -> int:
+        """Store wholesale electricity prices (national and regional)"""
+        if not data:
+            return 0
+
+        # Pre-load all region mappings once (avoid repeated API calls)
+        region_code_to_uuid = {}
+        region_id_to_uuid = {}
+        
+        try:
+            regions_response = self.supabase.table("uk_regions").select("id, region_code, region_id").execute()
+            for region in regions_response.data:
+                if region.get('region_code'):
+                    region_code_to_uuid[region['region_code']] = region['id']
+                if region.get('region_id'):
+                    region_id_to_uuid[region['region_id']] = region['id']
+        except Exception as e:
+            logger.warning(f"Could not pre-load region mappings: {e}")
+
+        # Separate national and regional prices for batch processing
+        national_prices = []
+        regional_prices = []
+        
+        for record in data:
+            try:
+                price_data = {
+                    'timestamp': record['timestamp'],
+                    'price_gbp_mwh': record['price_gbp_mwh'],
+                    'price_type': record.get('price_type', 'system_price'),
+                    'settlement_period': record.get('settlement_period'),
+                    'data_source': record.get('data_source', 'neso_api')
+                }
+                
+                # Handle regional prices - map region_code to UUID
+                if record.get('region_id') or record.get('region_code'):
+                    region_id = record.get('region_id')
+                    region_code = record.get('region_code')
+                    
+                    # Get region UUID from pre-loaded mappings
+                    region_uuid = None
+                    if region_code and region_code in region_code_to_uuid:
+                        region_uuid = region_code_to_uuid[region_code]
+                    elif region_id and region_id in region_id_to_uuid:
+                        region_uuid = region_id_to_uuid[region_id]
+                    
+                    if region_uuid:
+                        price_data['region_id'] = region_uuid
+                        regional_prices.append(price_data)
+                    else:
+                        logger.warning(f"Could not find region UUID for {region_code or region_id}, skipping regional price")
+                else:
+                    # National price
+                    price_data['region_id'] = None
+                    national_prices.append(price_data)
+
+            except Exception as e:
+                logger.warning(f"Failed to prepare wholesale price: {e}")
+
+        # Batch insert national prices
+        stored_count = 0
+        if national_prices:
+            try:
+                self.supabase.table("wholesale_prices").upsert(
+                    national_prices,
+                    on_conflict='timestamp,region_id'
+                ).execute()
+                stored_count += len(national_prices)
+            except Exception as e:
+                logger.warning(f"Failed to batch store national prices: {e}")
+                # Fallback to individual inserts
+                for price in national_prices:
+                    try:
+                        self.supabase.table("wholesale_prices").upsert(
+                            price,
+                            on_conflict='timestamp,region_id'
+                        ).execute()
+                        stored_count += 1
+                    except Exception as e2:
+                        logger.warning(f"Failed to store national price: {e2}")
+
+        # Batch insert regional prices (limit to avoid too many)
+        if regional_prices:
+            try:
+                # Limit regional prices to most recent ones if there are too many
+                if len(regional_prices) > 200:  # Limit to ~200 regional prices max
+                    # Sort by timestamp and take most recent
+                    regional_prices.sort(key=lambda x: x.get('timestamp', ''), reverse=True)
+                    regional_prices = regional_prices[:200]
+                    logger.info(f"Limited regional prices to {len(regional_prices)} most recent records")
+                
+                self.supabase.table("wholesale_prices").upsert(
+                    regional_prices,
+                    on_conflict='timestamp,region_id'
+                ).execute()
+                stored_count += len(regional_prices)
+            except Exception as e:
+                logger.warning(f"Failed to batch store regional prices: {e}")
+                # Fallback to individual inserts (but limit)
+                for price in regional_prices[:200]:  # Limit even in fallback
+                    try:
+                        self.supabase.table("wholesale_prices").upsert(
+                            price,
+                            on_conflict='timestamp,region_id'
+                        ).execute()
+                        stored_count += 1
+                    except Exception as e2:
+                        logger.warning(f"Failed to store regional price: {e2}")
+
+        logger.info(f"Stored {stored_count} wholesale price records ({len(national_prices)} national, {len(regional_prices)} regional)")
+        return stored_count
+
     # ============================================
     # BECKN COMPUTE WINDOWS DATA
     # ============================================
@@ -546,6 +679,30 @@ class ComprehensiveEnergyPipeline:
                 demand_count
             )
 
+            # Store actual demand
+            demand_actual_count = self.store_demand_actual(all_data.get('demand_actual', []))
+            if demand_actual_count > 0:
+                self.log_api_call(
+                    'neso_api',
+                    '/demand_actual',
+                    200,
+                    len(all_data.get('demand_actual', [])),
+                    demand_actual_count
+                )
+
+            # Store wholesale prices (national and regional)
+            national_price_count = self.store_wholesale_prices(all_data.get('wholesale_prices', []))
+            regional_price_count = self.store_wholesale_prices(all_data.get('wholesale_prices_regional', []))
+            price_count = national_price_count + regional_price_count
+            if price_count > 0:
+                self.log_api_call(
+                    'neso_api',
+                    '/wholesale_prices',
+                    200,
+                    len(all_data.get('wholesale_prices', [])) + len(all_data.get('wholesale_prices_regional', [])),
+                    price_count
+                )
+
             # Store Beckn data
             beckn_count = 0
             if all_data['beckn_data']:
@@ -560,7 +717,14 @@ class ComprehensiveEnergyPipeline:
 
             logger.info("=" * 80)
             logger.info("Pipeline iteration completed successfully")
-            logger.info(f"Total records stored: {carbon_nat_count + carbon_reg_count + demand_count + beckn_count}")
+            total_records = carbon_nat_count + carbon_reg_count + demand_count + demand_actual_count + price_count + beckn_count
+            logger.info(f"Total records stored: {total_records}")
+            logger.info(f"  - Carbon (national): {carbon_nat_count}")
+            logger.info(f"  - Carbon (regional): {carbon_reg_count}")
+            logger.info(f"  - Demand forecast: {demand_count}")
+            logger.info(f"  - Demand actual: {demand_actual_count}")
+            logger.info(f"  - Wholesale prices: {price_count}")
+            logger.info(f"  - Beckn windows: {beckn_count}")
             logger.info("=" * 80)
 
             return True
