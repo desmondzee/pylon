@@ -26,7 +26,7 @@ export default function HeroSection() {
 
         <div className="mt-12 lg:mt-16 flex flex-col sm:flex-row gap-4">
           <Link
-            href="/user"
+            href="/signin"
             className="inline-flex items-center justify-center px-8 py-4 text-base font-medium text-white bg-pylon-dark rounded hover:bg-pylon-dark/90 transition-colors"
           >
             Launch Dashboard

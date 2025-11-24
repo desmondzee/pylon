@@ -119,7 +119,7 @@ export default function IndustriesPage() {
 
             <div className="mt-12">
               <Link
-                href="/user"
+                href="/signin"
                 className="inline-flex items-center text-base font-medium text-pylon-dark hover:text-pylon-accent transition-colors"
               >
                 Get Started

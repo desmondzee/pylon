@@ -3,13 +3,13 @@
 import Link from 'next/link'
 import Image from 'next/image'
 import { usePathname } from 'next/navigation'
-import { Home, ClipboardList, TrendingUp, History, HelpCircle, Settings, ChevronRight } from 'lucide-react'
+import { Home, ClipboardList, BarChart2, History, HelpCircle, Settings, ChevronRight } from 'lucide-react'
 import clsx from 'clsx'
 
 const mainNavItems = [
   { icon: Home, label: 'Home', href: '/operator' },
-  { icon: ClipboardList, label: 'Queues and Bookings', href: '/operator/queues' },
-  { icon: TrendingUp, label: 'Grid Forecasts', href: '/operator/forecasts' },
+  { icon: ClipboardList, label: 'Workloads', href: '/operator/workloads' },
+  { icon: BarChart2, label: 'Analytics', href: '/operator/analytics' },
   { icon: History, label: 'History', href: '/operator/history' },
 ]
 

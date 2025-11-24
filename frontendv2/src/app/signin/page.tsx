@@ -38,7 +38,7 @@ export default function SignInPage() {
           <div className="grid md:grid-cols-2 gap-6 lg:gap-8 max-w-4xl mx-auto">
             {/* User Dashboard */}
             <Link
-              href="/user"
+              href="/signin/user"
               className="group bg-white rounded-lg p-8 lg:p-10 border border-pylon-dark/10 hover:border-pylon-accent transition-all hover:shadow-lg"
             >
               <div className="flex flex-col items-center text-center">
@@ -52,7 +52,7 @@ export default function SignInPage() {
                   Submit and manage your compute workloads. Track carbon impact and optimize your infrastructure.
                 </p>
                 <div className="flex items-center gap-2 text-pylon-accent font-medium group-hover:gap-3 transition-all">
-                  Continue as User
+                  Sign in as User
                   <ArrowRight className="w-5 h-5" />
                 </div>
               </div>
@@ -60,7 +60,7 @@ export default function SignInPage() {
 
             {/* Operator Dashboard */}
             <Link
-              href="/operator"
+              href="/signin/operator"
               className="group bg-white rounded-lg p-8 lg:p-10 border border-pylon-dark/10 hover:border-pylon-accent transition-all hover:shadow-lg"
             >
               <div className="flex flex-col items-center text-center">
@@ -74,7 +74,7 @@ export default function SignInPage() {
                   Monitor data centers and grid status. Manage tenant workloads and optimize energy distribution.
                 </p>
                 <div className="flex items-center gap-2 text-pylon-accent font-medium group-hover:gap-3 transition-all">
-                  Continue as Operator
+                  Sign in as Operator
                   <ArrowRight className="w-5 h-5" />
                 </div>
               </div>

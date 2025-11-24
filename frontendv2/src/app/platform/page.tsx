@@ -151,7 +151,7 @@ export default function PlatformPage() {
 
           <div className="mt-16 pt-16 border-t border-pylon-dark/10">
             <Link
-              href="/user"
+              href="/signin"
               className="inline-flex items-center text-base font-medium text-pylon-dark hover:text-pylon-accent transition-colors"
             >
               Try the Platform
