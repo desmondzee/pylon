@@ -1,10 +1,14 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Server, Search, Filter, Download, ArrowUpDown, ChevronRight, Zap, Clock, Leaf, AlertCircle, Trash2, X } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
+import { WorkloadWithRecommendations } from '@/lib/workload-types'
+import { fetchGridZones } from '@/lib/grid-zones'
+import { GridZoneMap } from '@/lib/workload-types'
+import WorkloadRecommendations from '@/components/user/WorkloadRecommendations'
 
 // Mock data for reference (will be replaced with Supabase data)
 const mockWorkloads = [
@@ -161,7 +165,7 @@ const workloadTypeLabels: Record<string, string> = {
 export default function WorkloadsPage() {
   const router = useRouter()
   const supabase = createClient()
-  const [workloads, setWorkloads] = useState<any[]>([])
+  const [workloads, setWorkloads] = useState<WorkloadWithRecommendations[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [filter, setFilter] = useState('all')
@@ -169,83 +173,122 @@ export default function WorkloadsPage() {
   const [selectedWorkloads, setSelectedWorkloads] = useState<Set<string>>(new Set())
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [deleting, setDeleting] = useState(false)
-  const [selectedWorkloadDetail, setSelectedWorkloadDetail] = useState<any | null>(null)
+  const [selectedWorkloadDetail, setSelectedWorkloadDetail] = useState<WorkloadWithRecommendations | null>(null)
+  const [gridZoneMap, setGridZoneMap] = useState<GridZoneMap>({})
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null)
+  const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null)
 
   // Load workloads from Supabase
+  const loadWorkloads = async () => {
+    try {
+      // Get current user
+      const { data: { user } } = await supabase.auth.getUser()
+
+      if (!user) {
+        router.push('/signin/user')
+        return
+      }
+
+      // Get user profile
+      const { data: userProfile, error: profileError } = await supabase
+        .from('users')
+        .select('id')
+        .eq('auth_user_id', user.id)
+        .single()
+
+      if (profileError || !userProfile) {
+        setError('User profile not found')
+        setLoading(false)
+        return
+      }
+
+      setCurrentUserId(userProfile.id)
+
+      // Load workloads for this user with recommendation fields
+      const { data: workloadsData, error: workloadsError } = await supabase
+        .from('compute_workloads')
+        .select('*')
+        .eq('user_id', userProfile.id)
+        .order('submitted_at', { ascending: false })
+
+      if (workloadsError) {
+        console.error('Workloads error:', workloadsError)
+        setError(`Failed to load workloads: ${workloadsError.message}`)
+        setLoading(false)
+        return
+      }
+
+      // Transform data to match UI expectations
+      const transformedWorkloads: WorkloadWithRecommendations[] = (workloadsData || []).map(w => ({
+        id: w.id,
+        job_id: w.job_id,
+        workload_name: w.workload_name,
+        workload_type: w.workload_type,
+        status: w.status?.toUpperCase() || 'PENDING',
+        urgency: w.urgency || 'MEDIUM',
+        host_dc: w.host_dc || null,
+        region: w.host_dc || null,
+        required_gpu_mins: w.required_gpu_mins,
+        required_cpu_cores: w.required_cpu_cores,
+        required_memory_gb: w.required_memory_gb,
+        estimated_energy_kwh: w.estimated_energy_kwh,
+        carbon_cap_gco2: w.carbon_cap_gco2,
+        actual_carbon_gco2: w.carbon_emitted_kg ? Math.round(w.carbon_emitted_kg * 1000) : null,
+        max_price_gbp: w.max_price_gbp,
+        actual_cost_gbp: w.cost_gbp,
+        deferral_window_mins: w.deferral_window_mins,
+        deadline: w.deadline,
+        created_at: w.submitted_at || w.created_at,
+        started_at: w.actual_start,
+        completed_at: w.actual_end,
+        progress: w.status === 'completed' ? 100 : w.status === 'running' ? 50 : 0,
+        // Recommendation fields
+        recommended_grid_zone_id: w.recommended_grid_zone_id || null,
+        recommended_2_grid_zone_id: w.recommended_2_grid_zone_id || null,
+        recommended_3_grid_zone_id: w.recommended_3_grid_zone_id || null,
+        chosen_grid_zone: w.chosen_grid_zone || null,
+        user_id: w.user_id,
+      }))
+
+      setWorkloads(transformedWorkloads)
+
+      // Collect all grid zone IDs that need to be fetched
+      const allZoneIds: string[] = []
+      for (const w of transformedWorkloads) {
+        if (w.recommended_grid_zone_id) allZoneIds.push(w.recommended_grid_zone_id)
+        if (w.recommended_2_grid_zone_id) allZoneIds.push(w.recommended_2_grid_zone_id)
+        if (w.recommended_3_grid_zone_id) allZoneIds.push(w.recommended_3_grid_zone_id)
+        if (w.chosen_grid_zone) allZoneIds.push(w.chosen_grid_zone)
+      }
+
+      // Fetch grid zone metadata
+      if (allZoneIds.length > 0) {
+        const zones = await fetchGridZones(allZoneIds)
+        setGridZoneMap(zones)
+      }
+
+      setLoading(false)
+    } catch (err) {
+      console.error('Load error:', err)
+      setError(`Failed to load workloads: ${err instanceof Error ? err.message : 'Unknown error'}`)
+      setLoading(false)
+    }
+  }
+
   useEffect(() => {
-    const loadWorkloads = async () => {
-      try {
-        // Get current user
-        const { data: { user } } = await supabase.auth.getUser()
+    loadWorkloads()
 
-        if (!user) {
-          router.push('/signin/user')
-          return
-        }
+    // Set up polling for live updates (every 12 seconds)
+    pollingIntervalRef.current = setInterval(() => {
+      loadWorkloads()
+    }, 12000) // 12 seconds
 
-        // Get user profile
-        const { data: userProfile, error: profileError } = await supabase
-          .from('users')
-          .select('id')
-          .eq('auth_user_id', user.id)
-          .single()
-
-        if (profileError || !userProfile) {
-          setError('User profile not found')
-          setLoading(false)
-          return
-        }
-
-        // Load workloads for this user
-        const { data: workloadsData, error: workloadsError } = await supabase
-          .from('compute_workloads')
-          .select('*')
-          .eq('user_id', userProfile.id)
-          .order('submitted_at', { ascending: false })
-
-        if (workloadsError) {
-          console.error('Workloads error:', workloadsError)
-          setError(`Failed to load workloads: ${workloadsError.message}`)
-          setLoading(false)
-          return
-        }
-
-        // Transform data to match UI expectations
-        const transformedWorkloads = (workloadsData || []).map(w => ({
-          id: w.id,
-          job_id: w.job_id,
-          workload_name: w.workload_name,
-          workload_type: w.workload_type,
-          status: w.status?.toUpperCase() || 'PENDING',
-          urgency: w.urgency || 'MEDIUM',
-          host_dc: w.host_dc || 'Not assigned',
-          region: w.host_dc || 'Not assigned',
-          required_gpu_mins: w.required_gpu_mins,
-          required_cpu_cores: w.required_cpu_cores,
-          required_memory_gb: w.required_memory_gb,
-          estimated_energy_kwh: w.estimated_energy_kwh,
-          carbon_cap_gco2: w.carbon_cap_gco2,
-          actual_carbon_gco2: w.carbon_emitted_kg ? Math.round(w.carbon_emitted_kg * 1000) : null,
-          max_price_gbp: w.max_price_gbp,
-          actual_cost_gbp: w.cost_gbp,
-          deferral_window_mins: w.deferral_window_mins,
-          deadline: w.deadline,
-          created_at: w.submitted_at || w.created_at,
-          started_at: w.actual_start,
-          completed_at: w.actual_end,
-          progress: w.status === 'completed' ? 100 : w.status === 'running' ? 50 : 0,
-        }))
-
-        setWorkloads(transformedWorkloads)
-        setLoading(false)
-      } catch (err) {
-        console.error('Load error:', err)
-        setError(`Failed to load workloads: ${err instanceof Error ? err.message : 'Unknown error'}`)
-        setLoading(false)
+    // Cleanup on unmount
+    return () => {
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current)
       }
     }
-
-    loadWorkloads()
   }, [router, supabase])
 
   const filteredWorkloads = workloads.filter(w => {
@@ -580,6 +623,20 @@ export default function WorkloadsPage() {
                 <p className="text-xs text-pylon-dark/60">{workload.required_memory_gb}GB RAM</p>
               </div>
             </div>
+
+            {/* Grid Zone Recommendations */}
+            {currentUserId && (
+              <WorkloadRecommendations
+                workloadId={workload.id}
+                userId={currentUserId}
+                recommended1Id={workload.recommended_grid_zone_id}
+                recommended2Id={workload.recommended_2_grid_zone_id}
+                recommended3Id={workload.recommended_3_grid_zone_id}
+                chosenGridZoneId={workload.chosen_grid_zone}
+                gridZoneMap={gridZoneMap}
+                onSelectionComplete={loadWorkloads}
+              />
+            )}
 
             {/* Footer */}
             <div className="flex items-center justify-between pt-4 border-t border-pylon-dark/5">
