@@ -29,8 +29,9 @@ logger = logging.getLogger(__name__)
 # Configuration
 POLL_INTERVAL = int(os.getenv('WORKLOAD_COMPLETION_POLL_INTERVAL', '60'))  # Check every minute
 MAX_WORKLOADS_PER_CYCLE = int(os.getenv('MAX_COMPLETION_WORKLOADS_PER_CYCLE', '50'))
+DEFAULT_RUNTIME_HOURS = float(os.getenv('DEFAULT_WORKLOAD_RUNTIME_HOURS', '24'))  # Default 24 hours if no runtime specified
 
-logger.info(f"Workload Completion Service initialized (poll interval: {POLL_INTERVAL}s)")
+logger.info(f"Workload Completion Service initialized (poll interval: {POLL_INTERVAL}s, default runtime: {DEFAULT_RUNTIME_HOURS}h)")
 
 
 def check_and_complete_workloads():
@@ -40,17 +41,37 @@ def check_and_complete_workloads():
         return
     
     try:
-        # Query for all non-completed workloads (pending, scheduled, queued, running, etc.)
-        # Exclude completed, cancelled, and deferred statuses
-        result = supabase.table("compute_workloads")\
-            .select("id, workload_name, status, created_at, runtime_hours, estimated_duration_hours")\
-            .not_.in_("status", ["completed", "cancelled", "deferred"])\
-            .not_.is_("created_at", "null")\
-            .order("created_at", desc=False)\
-            .limit(MAX_WORKLOADS_PER_CYCLE)\
-            .execute()
+        # Try to query with runtime_hours first, fallback to estimated_duration_hours only if column doesn't exist
+        result = None
+        has_runtime_hours_column = True
         
-        if not result.data:
+        try:
+            # First attempt: try to include runtime_hours
+            result = supabase.table("compute_workloads")\
+                .select("id, workload_name, status, created_at, runtime_hours, estimated_duration_hours, metadata")\
+                .not_.in_("status", ["completed", "cancelled", "deferred"])\
+                .not_.is_("created_at", "null")\
+                .order("created_at", desc=False)\
+                .limit(MAX_WORKLOADS_PER_CYCLE)\
+                .execute()
+        except Exception as e:
+            error_str = str(e).lower()
+            if 'runtime_hours' in error_str or 'does not exist' in error_str or '42703' in error_str:
+                logger.debug("runtime_hours column not found, falling back to estimated_duration_hours only")
+                has_runtime_hours_column = False
+                # Retry without runtime_hours
+                result = supabase.table("compute_workloads")\
+                    .select("id, workload_name, status, created_at, estimated_duration_hours, metadata")\
+                    .not_.in_("status", ["completed", "cancelled", "deferred"])\
+                    .not_.is_("created_at", "null")\
+                    .order("created_at", desc=False)\
+                    .limit(MAX_WORKLOADS_PER_CYCLE)\
+                    .execute()
+            else:
+                # Re-raise if it's a different error
+                raise
+        
+        if not result or not result.data:
             logger.debug("No non-completed workloads found to check")
             return
         
@@ -63,8 +84,20 @@ def check_and_complete_workloads():
             workload_name = workload.get('workload_name', 'Unnamed Workload')
             status = workload.get('status', 'unknown')
             created_at_str = workload.get('created_at')
-            runtime_hours = workload.get('runtime_hours')
+            metadata = workload.get('metadata') or {}
+            
+            # Try to get runtime from multiple sources
+            runtime_hours = None
+            if has_runtime_hours_column:
+                runtime_hours = workload.get('runtime_hours')
+            
             estimated_duration_hours = workload.get('estimated_duration_hours')
+            
+            # Fallback: check metadata for runtime information
+            if runtime_hours is None and estimated_duration_hours is None:
+                if isinstance(metadata, dict):
+                    runtime_hours = metadata.get('runtime_hours') or metadata.get('runtime')
+                    estimated_duration_hours = estimated_duration_hours or metadata.get('estimated_duration_hours') or metadata.get('duration_hours')
             
             if not created_at_str:
                 logger.debug(f"[{workload_id}] Skipping - no created_at timestamp")
@@ -78,11 +111,24 @@ def check_and_complete_workloads():
                 continue
             
             # Determine runtime (prefer runtime_hours, fallback to estimated_duration_hours)
-            runtime = runtime_hours if runtime_hours is not None else estimated_duration_hours
+            # Convert to float if needed
+            runtime = None
+            if runtime_hours is not None:
+                try:
+                    runtime = float(runtime_hours)
+                except (ValueError, TypeError):
+                    runtime = None
             
+            if runtime is None and estimated_duration_hours is not None:
+                try:
+                    runtime = float(estimated_duration_hours)
+                except (ValueError, TypeError):
+                    runtime = None
+            
+            # Use default runtime if none specified (prevents workloads from being stuck forever)
             if runtime is None or runtime <= 0:
-                logger.debug(f"[{workload_id}] Skipping - no valid runtime (runtime_hours={runtime_hours}, estimated_duration_hours={estimated_duration_hours})")
-                continue
+                logger.debug(f"[{workload_id}] No valid runtime found, using default {DEFAULT_RUNTIME_HOURS} hours")
+                runtime = DEFAULT_RUNTIME_HOURS
             
             # Calculate expected completion time based on creation time
             expected_completion = created_at + timedelta(hours=float(runtime))
@@ -105,14 +151,19 @@ def check_and_complete_workloads():
                         "updated_at": now.isoformat()
                     }
                     
-                    # Only set actual_end if it's not already set
-                    existing_workload = supabase.table("compute_workloads")\
-                        .select("actual_end")\
-                        .eq("id", workload_id)\
-                        .single()\
-                        .execute()
-                    
-                    if existing_workload.data and not existing_workload.data.get('actual_end'):
+                    # Only set actual_end if it's not already set (preserve real completion time if set)
+                    try:
+                        existing_workload = supabase.table("compute_workloads")\
+                            .select("actual_end")\
+                            .eq("id", workload_id)\
+                            .single()\
+                            .execute()
+                        
+                        if existing_workload.data and not existing_workload.data.get('actual_end'):
+                            update_data["actual_end"] = now.isoformat()
+                    except Exception as e:
+                        # If we can't check, just set it (better than missing it)
+                        logger.debug(f"[{workload_id}] Could not check existing actual_end, setting it: {e}")
                         update_data["actual_end"] = now.isoformat()
                     
                     update_result = supabase.table("compute_workloads").update(update_data).eq("id", workload_id).execute()
