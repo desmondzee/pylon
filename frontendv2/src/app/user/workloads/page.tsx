@@ -1,11 +1,13 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { Server, Search, Filter, Download, ArrowUpDown, ChevronRight, Zap, Clock, Leaf, AlertCircle } from 'lucide-react'
+import { createClient } from '@/lib/supabase/client'
 
-// Mock data based on backend schema
-const workloads = [
+// Mock data for reference (will be replaced with Supabase data)
+const mockWorkloads = [
   {
     id: 'WL-001',
     job_id: 'job_2024_001_a4f3',
@@ -157,11 +159,93 @@ const workloadTypeLabels: Record<string, string> = {
 }
 
 export default function WorkloadsPage() {
+  const router = useRouter()
+  const supabase = createClient()
+  const [workloads, setWorkloads] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [filter, setFilter] = useState('all')
   const [searchQuery, setSearchQuery] = useState('')
 
+  // Load workloads from Supabase
+  useEffect(() => {
+    const loadWorkloads = async () => {
+      try {
+        // Get current user
+        const { data: { user } } = await supabase.auth.getUser()
+
+        if (!user) {
+          router.push('/signin/user')
+          return
+        }
+
+        // Get user profile
+        const { data: userProfile, error: profileError } = await supabase
+          .from('users')
+          .select('id')
+          .eq('auth_user_id', user.id)
+          .single()
+
+        if (profileError || !userProfile) {
+          setError('User profile not found')
+          setLoading(false)
+          return
+        }
+
+        // Load workloads for this user
+        const { data: workloadsData, error: workloadsError } = await supabase
+          .from('compute_workloads')
+          .select('*')
+          .eq('user_id', userProfile.id)
+          .order('submitted_at', { ascending: false })
+
+        if (workloadsError) {
+          console.error('Workloads error:', workloadsError)
+          setError(`Failed to load workloads: ${workloadsError.message}`)
+          setLoading(false)
+          return
+        }
+
+        // Transform data to match UI expectations
+        const transformedWorkloads = (workloadsData || []).map(w => ({
+          id: w.id,
+          job_id: w.job_id,
+          workload_name: w.workload_name,
+          workload_type: w.workload_type,
+          status: w.status?.toUpperCase() || 'PENDING',
+          urgency: w.urgency || 'MEDIUM',
+          host_dc: w.host_dc || 'Not assigned',
+          region: w.host_dc || 'Not assigned',
+          required_gpu_mins: w.required_gpu_mins,
+          required_cpu_cores: w.required_cpu_cores,
+          required_memory_gb: w.required_memory_gb,
+          estimated_energy_kwh: w.estimated_energy_kwh,
+          carbon_cap_gco2: w.carbon_cap_gco2,
+          actual_carbon_gco2: w.carbon_emitted_kg ? Math.round(w.carbon_emitted_kg * 1000) : null,
+          max_price_gbp: w.max_price_gbp,
+          actual_cost_gbp: w.cost_gbp,
+          deferral_window_mins: w.deferral_window_mins,
+          deadline: w.deadline,
+          created_at: w.submitted_at || w.created_at,
+          started_at: w.actual_start,
+          completed_at: w.actual_end,
+          progress: w.status === 'completed' ? 100 : w.status === 'running' ? 50 : 0,
+        }))
+
+        setWorkloads(transformedWorkloads)
+        setLoading(false)
+      } catch (err) {
+        console.error('Load error:', err)
+        setError(`Failed to load workloads: ${err instanceof Error ? err.message : 'Unknown error'}`)
+        setLoading(false)
+      }
+    }
+
+    loadWorkloads()
+  }, [router, supabase])
+
   const filteredWorkloads = workloads.filter(w => {
-    if (filter !== 'all' && w.status !== filter) return false
+    if (filter !== 'all' && w.status !== filter.toUpperCase()) return false
     if (searchQuery && !w.workload_name.toLowerCase().includes(searchQuery.toLowerCase()) && !w.job_id.toLowerCase().includes(searchQuery.toLowerCase())) return false
     return true
   })
@@ -179,8 +263,29 @@ export default function WorkloadsPage() {
         <p className="text-sm text-pylon-dark/60 mt-1">View and manage your compute workloads</p>
       </div>
 
-      {/* Filters and search */}
-      <div className="bg-white rounded-lg border border-pylon-dark/5 p-4">
+      {/* Error banner */}
+      {error && (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-3">
+          <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+          <div>
+            <p className="text-sm font-medium text-red-800 mb-1">Error</p>
+            <p className="text-xs text-red-700">{error}</p>
+          </div>
+        </div>
+      )}
+
+      {/* Loading state */}
+      {loading && (
+        <div className="bg-white rounded-lg border border-pylon-dark/5 p-12 text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-pylon-accent mx-auto mb-4"></div>
+          <p className="text-sm text-pylon-dark/60">Loading workloads...</p>
+        </div>
+      )}
+
+      {!loading && !error && (
+        <>
+          {/* Filters and search */}
+          <div className="bg-white rounded-lg border border-pylon-dark/5 p-4">
         <div className="flex flex-col lg:flex-row gap-4">
           {/* Search */}
           <div className="flex-1 relative">
@@ -368,18 +473,24 @@ export default function WorkloadsPage() {
         ))}
       </div>
 
-      {filteredWorkloads.length === 0 && (
-        <div className="bg-white rounded-lg border border-pylon-dark/5 p-12 text-center">
-          <Server className="w-12 h-12 text-pylon-dark/20 mx-auto mb-4" />
-          <h3 className="text-lg font-semibold text-pylon-dark mb-2">No workloads found</h3>
-          <p className="text-sm text-pylon-dark/60 mb-6">Try adjusting your filters or search query</p>
-          <Link
-            href="/user"
-            className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-pylon-dark rounded hover:bg-pylon-dark/90 transition-colors"
-          >
-            Back to Dashboard
-          </Link>
-        </div>
+          {filteredWorkloads.length === 0 && (
+            <div className="bg-white rounded-lg border border-pylon-dark/5 p-12 text-center">
+              <Server className="w-12 h-12 text-pylon-dark/20 mx-auto mb-4" />
+              <h3 className="text-lg font-semibold text-pylon-dark mb-2">No workloads found</h3>
+              <p className="text-sm text-pylon-dark/60 mb-6">
+                {workloads.length === 0
+                  ? "You haven't submitted any workloads yet. Submit your first workload to get started!"
+                  : "Try adjusting your filters or search query"}
+              </p>
+              <Link
+                href={workloads.length === 0 ? "/user/submit" : "/user"}
+                className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-pylon-dark rounded hover:bg-pylon-dark/90 transition-colors"
+              >
+                {workloads.length === 0 ? "Submit Workload" : "Back to Dashboard"}
+              </Link>
+            </div>
+          )}
+        </>
       )}
     </div>
   )

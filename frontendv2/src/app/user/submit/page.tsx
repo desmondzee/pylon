@@ -1,10 +1,17 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { ChevronRight, Info, AlertCircle, CheckCircle2, Server, Zap, Clock, Leaf, TrendingDown, MapPin } from 'lucide-react'
+import { createClient } from '@/lib/supabase/client'
 
 export default function SubmitWorkloadPage() {
+  const router = useRouter()
+  const supabase = createClient()
+  const [currentUser, setCurrentUser] = useState<any>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const [formData, setFormData] = useState({
     workload_name: '',
     workload_type: 'TRAINING_RUN',
@@ -23,59 +30,112 @@ export default function SubmitWorkloadPage() {
 
   const [estimatedCost, setEstimatedCost] = useState<number | null>(null)
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault()
+  // Load current user on mount
+  useEffect(() => {
+    const loadUser = async () => {
+      const { data: { user } } = await supabase.auth.getUser()
 
-    // Generate a unique workload ID
-    const workloadId = `WL-${Date.now().toString().slice(-6)}`
-    const jobId = `job_${new Date().getFullYear()}_${Math.random().toString(36).substring(2, 9)}`
+      if (!user) {
+        router.push('/signin/user')
+        return
+      }
 
-    // Create workload object
-    const newWorkload = {
-      id: workloadId,
-      job_id: jobId,
-      name: formData.workload_name,
-      workload_type: formData.workload_type,
-      region: formData.host_dc || 'Auto-select',
-      status: 'Queued',
-      carbon: 'Low',
-      urgency: formData.urgency,
-      required_gpu_mins: formData.required_gpu_mins,
-      required_cpu_cores: formData.required_cpu_cores,
-      required_memory_gb: formData.required_memory_gb,
-      estimated_energy_kwh: formData.estimated_energy_kwh,
-      carbon_cap_gco2: formData.carbon_cap_gco2,
-      max_price_gbp: formData.max_price_gbp,
-      deferral_window_mins: formData.deferral_window_mins,
-      deadline: formData.deadline,
-      is_deferrable: formData.is_deferrable,
-      submitted_at: new Date().toISOString(),
+      // Get user profile from users table
+      const { data: userProfile, error: profileError } = await supabase
+        .from('users')
+        .select('id, user_email, user_name, operator_id')
+        .eq('auth_user_id', user.id)
+        .single()
+
+      if (profileError || !userProfile) {
+        setError('User profile not found. Please contact support.')
+        return
+      }
+
+      setCurrentUser(userProfile)
     }
 
-    // Save to localStorage
-    const existingWorkloads = JSON.parse(localStorage.getItem('pylon_workloads') || '[]')
-    existingWorkloads.unshift(newWorkload) // Add to beginning
-    localStorage.setItem('pylon_workloads', JSON.stringify(existingWorkloads))
+    loadUser()
+  }, [router, supabase])
 
-    alert('Workload submitted successfully! Check your dashboard.')
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setLoading(true)
+    setError(null)
 
-    // Reset form
-    setFormData({
-      workload_name: '',
-      workload_type: 'TRAINING_RUN',
-      urgency: 'MEDIUM',
-      host_dc: '',
-      required_gpu_mins: '',
-      required_cpu_cores: '',
-      required_memory_gb: '',
-      estimated_energy_kwh: '',
-      carbon_cap_gco2: '',
-      max_price_gbp: '',
-      deferral_window_mins: '120',
-      deadline: '',
-      is_deferrable: true,
-    })
-    setEstimatedCost(null)
+    if (!currentUser) {
+      setError('You must be logged in to submit workloads')
+      setLoading(false)
+      return
+    }
+
+    try {
+      // Generate a unique job ID
+      const jobId = `job_${new Date().getFullYear()}_${Math.random().toString(36).substring(2, 9)}`
+
+      // Prepare workload data for Supabase
+      const workloadData = {
+        job_id: jobId,
+        workload_name: formData.workload_name,
+        workload_type: formData.workload_type,
+        urgency: formData.urgency,
+        host_dc: formData.host_dc || null,
+        required_gpu_mins: formData.required_gpu_mins ? parseInt(formData.required_gpu_mins) : null,
+        required_cpu_cores: formData.required_cpu_cores ? parseInt(formData.required_cpu_cores) : null,
+        required_memory_gb: formData.required_memory_gb ? parseFloat(formData.required_memory_gb) : null,
+        estimated_energy_kwh: formData.estimated_energy_kwh ? parseFloat(formData.estimated_energy_kwh) : null,
+        carbon_cap_gco2: formData.carbon_cap_gco2 ? parseInt(formData.carbon_cap_gco2) : null,
+        max_price_gbp: formData.max_price_gbp ? parseFloat(formData.max_price_gbp) : null,
+        deferral_window_mins: formData.deferral_window_mins ? parseInt(formData.deferral_window_mins) : 120,
+        deadline: formData.deadline ? new Date(formData.deadline).toISOString() : null,
+        is_deferrable: formData.is_deferrable,
+        user_id: currentUser.id,
+        status: 'pending',
+        submitted_at: new Date().toISOString(),
+      }
+
+      // Insert into Supabase
+      const { data: insertedWorkload, error: insertError } = await supabase
+        .from('compute_workloads')
+        .insert([workloadData])
+        .select()
+        .single()
+
+      if (insertError) {
+        console.error('Insert error:', insertError)
+        setError(`Failed to submit workload: ${insertError.message}`)
+        setLoading(false)
+        return
+      }
+
+      // Success! Redirect to workloads page
+      alert('Workload submitted successfully! Redirecting to your dashboard...')
+
+      // Reset form
+      setFormData({
+        workload_name: '',
+        workload_type: 'TRAINING_RUN',
+        urgency: 'MEDIUM',
+        host_dc: '',
+        required_gpu_mins: '',
+        required_cpu_cores: '',
+        required_memory_gb: '',
+        estimated_energy_kwh: '',
+        carbon_cap_gco2: '',
+        max_price_gbp: '',
+        deferral_window_mins: '120',
+        deadline: '',
+        is_deferrable: true,
+      })
+      setEstimatedCost(null)
+
+      // Redirect to workloads page
+      router.push('/user/workloads')
+    } catch (err) {
+      console.error('Submission error:', err)
+      setError(`An unexpected error occurred: ${err instanceof Error ? err.message : 'Please try again.'}`)
+      setLoading(false)
+    }
   }
 
   const calculateEstimate = () => {
@@ -97,6 +157,17 @@ export default function SubmitWorkloadPage() {
         <h1 className="text-2xl font-semibold text-pylon-dark">Submit New Workload</h1>
         <p className="text-sm text-pylon-dark/60 mt-1">Deploy a new compute job with carbon-aware scheduling</p>
       </div>
+
+      {/* Error banner */}
+      {error && (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-3">
+          <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+          <div>
+            <p className="text-sm font-medium text-red-800 mb-1">Error</p>
+            <p className="text-xs text-red-700">{error}</p>
+          </div>
+        </div>
+      )}
 
       {/* Info banner */}
       <div className="bg-pylon-accent/5 border border-pylon-accent/20 rounded-lg p-4 flex items-start gap-3">
@@ -458,10 +529,11 @@ export default function SubmitWorkloadPage() {
             </Link>
             <button
               type="submit"
-              className="px-6 py-2.5 text-sm font-medium text-white bg-pylon-dark rounded hover:bg-pylon-dark/90 transition-all hover:shadow-lg flex items-center gap-2"
+              disabled={loading}
+              className="px-6 py-2.5 text-sm font-medium text-white bg-pylon-dark rounded hover:bg-pylon-dark/90 transition-all hover:shadow-lg flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <CheckCircle2 className="w-4 h-4" />
-              Submit Workload
+              {loading ? 'Submitting...' : 'Submit Workload'}
             </button>
           </div>
         </div>

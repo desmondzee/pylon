@@ -1,75 +1,114 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { ArrowUpRight, ArrowDownRight, Zap, Leaf, Clock, Server, Plus, Upload, BarChart3, Trash2, TrendingDown, DollarSign } from 'lucide-react'
-
-const stats = [
-  {
-    label: 'Active Workloads',
-    value: '24',
-    change: '+3',
-    trend: 'up',
-    icon: Server,
-  },
-  {
-    label: 'Carbon Saved',
-    value: '1.2t',
-    change: '+12%',
-    trend: 'up',
-    icon: Leaf,
-  },
-  {
-    label: 'Avg Response Time',
-    value: '45ms',
-    change: '-8%',
-    trend: 'up',
-    icon: Clock,
-  },
-  {
-    label: 'Money Saved',
-    value: '£845',
-    change: '+22%',
-    trend: 'up',
-    icon: DollarSign,
-    subtitle: 'vs industry average',
-  },
-]
-
-const defaultWorkloads = [
-  { id: 'WL-001', name: 'ML Training Job', region: 'UK-West', status: 'Running', carbon: 'Low' },
-  { id: 'WL-002', name: 'Data Processing', region: 'UK-North', status: 'Completed', carbon: 'Medium' },
-  { id: 'WL-003', name: 'API Inference', region: 'UK-South', status: 'Running', carbon: 'Low' },
-  { id: 'WL-004', name: 'Batch Analysis', region: 'UK-East', status: 'Queued', carbon: 'High' },
-]
+import { ArrowUpRight, ArrowDownRight, Zap, Leaf, Clock, Server, Plus, Upload, BarChart3, TrendingDown, DollarSign } from 'lucide-react'
+import { createClient } from '@/lib/supabase/client'
 
 export default function UserDashboard() {
-  const [recentWorkloads, setRecentWorkloads] = useState(defaultWorkloads)
+  const router = useRouter()
+  const supabase = createClient()
+  const [recentWorkloads, setRecentWorkloads] = useState<any[]>([])
+  const [stats, setStats] = useState({
+    activeWorkloads: 0,
+    totalWorkloads: 0,
+    completedWorkloads: 0,
+    totalCarbonSaved: 0,
+    totalCostSaved: 0,
+  })
+  const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    // Load workloads from localStorage
-    const storedWorkloads = localStorage.getItem('pylon_workloads')
-    if (storedWorkloads) {
-      const parsed = JSON.parse(storedWorkloads)
-      // Show up to 4 most recent
-      setRecentWorkloads(parsed.slice(0, 4))
-    }
+    loadDashboardData()
   }, [])
 
-  const handleClearJobs = () => {
-    if (confirm('Are you sure you want to clear all workloads? This cannot be undone.')) {
-      localStorage.removeItem('pylon_workloads')
-      // Also clear any user-specific workload keys
-      for (let i = localStorage.length - 1; i >= 0; i--) {
-        const key = localStorage.key(i)
-        if (key && key.startsWith('pylon_workloads')) {
-          localStorage.removeItem(key)
-        }
+  const loadDashboardData = async () => {
+    try {
+      // Get current user
+      const { data: { user } } = await supabase.auth.getUser()
+
+      if (!user) {
+        router.push('/signin/user')
+        return
       }
-      setRecentWorkloads(defaultWorkloads)
-      alert('All workloads cleared!')
-      // Force a refresh to show updated state
-      window.location.reload()
+
+      // Get user profile
+      const { data: userProfile, error: profileError } = await supabase
+        .from('users')
+        .select('id')
+        .eq('auth_user_id', user.id)
+        .single()
+
+      if (profileError || !userProfile) {
+        console.error('Profile error:', profileError)
+        setLoading(false)
+        return
+      }
+
+      // Load all workloads for this user
+      const { data: workloadsData, error: workloadsError } = await supabase
+        .from('compute_workloads')
+        .select('*')
+        .eq('user_id', userProfile.id)
+        .order('submitted_at', { ascending: false })
+
+      if (workloadsError) {
+        console.error('Workloads error:', workloadsError)
+        setLoading(false)
+        return
+      }
+
+      const workloads = workloadsData || []
+
+      // Calculate stats
+      const activeCount = workloads.filter(w => w.status === 'running' || w.status === 'pending').length
+      const completedCount = workloads.filter(w => w.status === 'completed').length
+
+      // Calculate total carbon saved (assuming 30% average reduction from carbon-aware scheduling)
+      const totalCarbonEmitted = workloads
+        .filter(w => w.carbon_emitted_kg)
+        .reduce((sum, w) => sum + (w.carbon_emitted_kg || 0), 0)
+      const carbonSaved = totalCarbonEmitted * 0.3 // 30% savings estimate
+
+      // Calculate cost saved (assuming 20% average cost reduction)
+      const totalCost = workloads
+        .filter(w => w.cost_gbp)
+        .reduce((sum, w) => sum + (w.cost_gbp || 0), 0)
+      const costSaved = totalCost * 0.2 // 20% savings estimate
+
+      setStats({
+        activeWorkloads: activeCount,
+        totalWorkloads: workloads.length,
+        completedWorkloads: completedCount,
+        totalCarbonSaved: carbonSaved,
+        totalCostSaved: costSaved,
+      })
+
+      // Transform recent workloads for display
+      const recentTransformed = workloads.slice(0, 4).map(w => {
+        // Calculate carbon level based on emissions
+        let carbonLevel = 'Low'
+        if (w.carbon_emitted_kg) {
+          const emissionsGrams = w.carbon_emitted_kg * 1000
+          if (emissionsGrams > 500) carbonLevel = 'High'
+          else if (emissionsGrams > 200) carbonLevel = 'Medium'
+        }
+
+        return {
+          id: w.job_id || w.id.substring(0, 8),
+          name: w.workload_name,
+          region: w.host_dc || 'Auto-select',
+          status: w.status ? w.status.charAt(0).toUpperCase() + w.status.slice(1) : 'Pending',
+          carbon: carbonLevel,
+        }
+      })
+
+      setRecentWorkloads(recentTransformed)
+      setLoading(false)
+    } catch (err) {
+      console.error('Dashboard load error:', err)
+      setLoading(false)
     }
   }
 
@@ -82,13 +121,6 @@ export default function UserDashboard() {
           <p className="text-sm text-pylon-dark/60 mt-1">Welcome back. Here's your compute overview.</p>
         </div>
         <div className="flex items-center gap-2">
-          <button
-            onClick={handleClearJobs}
-            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-red-600 bg-white border border-red-200 rounded hover:bg-red-50 transition-colors"
-          >
-            <Trash2 className="w-4 h-4" />
-            Clear Jobs
-          </button>
           <Link href="/user/analytics" className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-pylon-dark bg-white border border-pylon-dark/10 rounded hover:bg-pylon-light transition-colors">
             <BarChart3 className="w-4 h-4" />
             View Reports
@@ -100,36 +132,92 @@ export default function UserDashboard() {
         </div>
       </div>
 
-      {/* Stats grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        {stats.map((stat) => (
-          <div key={stat.label} className="bg-white rounded-lg p-6 border border-pylon-dark/5">
-            <div className="flex items-start justify-between">
-              <div>
-                <p className="text-sm text-pylon-dark/60">{stat.label}</p>
-                <p className="text-3xl font-semibold text-pylon-dark mt-2">{stat.value}</p>
-                {stat.subtitle && (
-                  <p className="text-xs text-pylon-dark/40 mt-1">{stat.subtitle}</p>
-                )}
+      {/* Loading state */}
+      {loading && (
+        <div className="bg-white rounded-lg border border-pylon-dark/5 p-12 text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-pylon-accent mx-auto mb-4"></div>
+          <p className="text-sm text-pylon-dark/60">Loading dashboard...</p>
+        </div>
+      )}
+
+      {!loading && (
+        <>
+          {/* Stats grid */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            {/* Active Workloads */}
+            <div className="bg-white rounded-lg p-6 border border-pylon-dark/5">
+              <div className="flex items-start justify-between">
+                <div>
+                  <p className="text-sm text-pylon-dark/60">Active Workloads</p>
+                  <p className="text-3xl font-semibold text-pylon-dark mt-2">{stats.activeWorkloads}</p>
+                </div>
+                <div className="w-10 h-10 rounded-lg bg-pylon-accent/10 flex items-center justify-center">
+                  <Server className="w-5 h-5 text-pylon-accent" />
+                </div>
               </div>
-              <div className="w-10 h-10 rounded-lg bg-pylon-accent/10 flex items-center justify-center">
-                <stat.icon className="w-5 h-5 text-pylon-accent" />
+              <div className="mt-4 flex items-center gap-1">
+                <span className="text-sm text-pylon-dark/40">Total: {stats.totalWorkloads}</span>
               </div>
             </div>
-            <div className="mt-4 flex items-center gap-1">
-              {stat.trend === 'up' ? (
+
+            {/* Carbon Saved */}
+            <div className="bg-white rounded-lg p-6 border border-pylon-dark/5">
+              <div className="flex items-start justify-between">
+                <div>
+                  <p className="text-sm text-pylon-dark/60">Carbon Saved</p>
+                  <p className="text-3xl font-semibold text-pylon-dark mt-2">
+                    {stats.totalCarbonSaved > 1
+                      ? `${(stats.totalCarbonSaved / 1000).toFixed(1)}t`
+                      : `${(stats.totalCarbonSaved * 1000).toFixed(0)}g`}
+                  </p>
+                  <p className="text-xs text-pylon-dark/40 mt-1">vs standard scheduling</p>
+                </div>
+                <div className="w-10 h-10 rounded-lg bg-pylon-accent/10 flex items-center justify-center">
+                  <Leaf className="w-5 h-5 text-pylon-accent" />
+                </div>
+              </div>
+              <div className="mt-4 flex items-center gap-1">
                 <ArrowUpRight className="w-4 h-4 text-pylon-accent" />
-              ) : (
-                <ArrowDownRight className="w-4 h-4 text-red-500" />
-              )}
-              <span className={`text-sm font-medium ${stat.trend === 'up' ? 'text-pylon-accent' : 'text-red-500'}`}>
-                {stat.change}
-              </span>
-              <span className="text-sm text-pylon-dark/40 ml-1">vs last week</span>
+                <span className="text-sm font-medium text-pylon-accent">30% reduction</span>
+              </div>
+            </div>
+
+            {/* Completed Workloads */}
+            <div className="bg-white rounded-lg p-6 border border-pylon-dark/5">
+              <div className="flex items-start justify-between">
+                <div>
+                  <p className="text-sm text-pylon-dark/60">Completed</p>
+                  <p className="text-3xl font-semibold text-pylon-dark mt-2">{stats.completedWorkloads}</p>
+                </div>
+                <div className="w-10 h-10 rounded-lg bg-pylon-accent/10 flex items-center justify-center">
+                  <Clock className="w-5 h-5 text-pylon-accent" />
+                </div>
+              </div>
+              <div className="mt-4 flex items-center gap-1">
+                <span className="text-sm text-pylon-dark/40">Success rate: 100%</span>
+              </div>
+            </div>
+
+            {/* Money Saved */}
+            <div className="bg-white rounded-lg p-6 border border-pylon-dark/5">
+              <div className="flex items-start justify-between">
+                <div>
+                  <p className="text-sm text-pylon-dark/60">Money Saved</p>
+                  <p className="text-3xl font-semibold text-pylon-dark mt-2">
+                    £{stats.totalCostSaved.toFixed(0)}
+                  </p>
+                  <p className="text-xs text-pylon-dark/40 mt-1">vs industry average</p>
+                </div>
+                <div className="w-10 h-10 rounded-lg bg-pylon-accent/10 flex items-center justify-center">
+                  <DollarSign className="w-5 h-5 text-pylon-accent" />
+                </div>
+              </div>
+              <div className="mt-4 flex items-center gap-1">
+                <ArrowUpRight className="w-4 h-4 text-pylon-accent" />
+                <span className="text-sm font-medium text-pylon-accent">20% reduction</span>
+              </div>
             </div>
           </div>
-        ))}
-      </div>
 
       {/* Main content grid */}
       <div className="grid lg:grid-cols-3 gap-6">
@@ -153,36 +241,47 @@ export default function UserDashboard() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-pylon-dark/5">
-                {recentWorkloads.map((workload) => (
-                  <tr key={workload.id} className="text-sm">
-                    <td className="py-4 font-mono text-pylon-dark/60">{workload.id}</td>
-                    <td className="py-4 font-medium text-pylon-dark">{workload.name}</td>
-                    <td className="py-4 text-pylon-dark/60">{workload.region}</td>
-                    <td className="py-4">
-                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                        workload.status === 'Running' ? 'bg-pylon-accent/10 text-pylon-accent' :
-                        workload.status === 'Completed' ? 'bg-pylon-dark/5 text-pylon-dark/60' :
-                        'bg-amber-50 text-amber-600'
-                      }`}>
-                        {workload.status}
-                      </span>
-                    </td>
-                    <td className="py-4">
-                      <span className={`inline-flex items-center gap-1.5 text-xs font-medium ${
-                        workload.carbon === 'Low' ? 'text-pylon-accent' :
-                        workload.carbon === 'Medium' ? 'text-amber-500' :
-                        'text-red-500'
-                      }`}>
-                        <span className={`w-1.5 h-1.5 rounded-full ${
-                          workload.carbon === 'Low' ? 'bg-pylon-accent' :
-                          workload.carbon === 'Medium' ? 'bg-amber-500' :
-                          'bg-red-500'
-                        }`} />
-                        {workload.carbon}
-                      </span>
+                {recentWorkloads.length > 0 ? (
+                  recentWorkloads.map((workload) => (
+                    <tr key={workload.id} className="text-sm">
+                      <td className="py-4 font-mono text-pylon-dark/60">{workload.id}</td>
+                      <td className="py-4 font-medium text-pylon-dark">{workload.name}</td>
+                      <td className="py-4 text-pylon-dark/60">{workload.region}</td>
+                      <td className="py-4">
+                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                          workload.status === 'Running' ? 'bg-pylon-accent/10 text-pylon-accent' :
+                          workload.status === 'Completed' ? 'bg-pylon-dark/5 text-pylon-dark/60' :
+                          'bg-amber-50 text-amber-600'
+                        }`}>
+                          {workload.status}
+                        </span>
+                      </td>
+                      <td className="py-4">
+                        <span className={`inline-flex items-center gap-1.5 text-xs font-medium ${
+                          workload.carbon === 'Low' ? 'text-pylon-accent' :
+                          workload.carbon === 'Medium' ? 'text-amber-500' :
+                          'text-red-500'
+                        }`}>
+                          <span className={`w-1.5 h-1.5 rounded-full ${
+                            workload.carbon === 'Low' ? 'bg-pylon-accent' :
+                            workload.carbon === 'Medium' ? 'bg-amber-500' :
+                            'bg-red-500'
+                          }`} />
+                          {workload.carbon}
+                        </span>
+                      </td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan={5} className="py-8 text-center">
+                      <p className="text-sm text-pylon-dark/60">No workloads yet.</p>
+                      <Link href="/user/submit" className="text-sm text-pylon-accent font-medium hover:underline mt-2 inline-block">
+                        Submit your first workload →
+                      </Link>
                     </td>
                   </tr>
-                ))}
+                )}
               </tbody>
             </table>
           </div>
@@ -335,6 +434,8 @@ export default function UserDashboard() {
           </div>
         </div>
       </div>
+        </>
+      )}
     </div>
   )
 }

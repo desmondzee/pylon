@@ -112,9 +112,9 @@ export default function UserSignInPage() {
               role: 'user',
               is_active: true
             })
-            .select('id, role')
+            .select('id, role, operator_id, user_email')
             .single()
-          
+
           if (createError || !newProfile) {
             setError('Failed to create user profile. Please contact your administrator.')
             console.error('Profile creation error:', createError)
@@ -122,7 +122,7 @@ export default function UserSignInPage() {
             setLoading(false)
             return
           }
-          
+
           userProfile = newProfile
         }
         

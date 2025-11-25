@@ -97,9 +97,9 @@ export default function OperatorSignInPage() {
               role: 'operator',  // Set as operator for operator signin
               is_active: true
             })
-            .select('id, role, operator_id')
+            .select('id, role, operator_id, user_email')
             .single()
-          
+
           if (createError || !newProfile) {
             setError('Failed to create user profile. Please contact your administrator.')
             console.error('Profile creation error:', createError)
@@ -107,7 +107,7 @@ export default function OperatorSignInPage() {
             setLoading(false)
             return
           }
-          
+
           userProfile = newProfile
         }
         
