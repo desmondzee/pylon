@@ -24,9 +24,10 @@ app = Flask(__name__)
 
 # Import BPP Orchestrator
 try:
-    from services.bpp_orchestrator import orchestrator
+    # Just check if the module can be imported
+    import services.bpp_orchestrator
     BPP_ORCHESTRATOR_ENABLED = True
-    logger.info("BPP Orchestrator loaded successfully")
+    logger.info("BPP Orchestrator module loaded successfully")
 except Exception as e:
     BPP_ORCHESTRATOR_ENABLED = False
     logger.warning(f"BPP Orchestrator not available: {e}")
@@ -827,20 +828,18 @@ def start_bpp_orchestrator_background():
         logger.info("BPP Orchestrator disabled")
         return
 
-    def run_async_loop():
-        """Run the async event loop in a separate thread"""
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
+    def run_bpp_orchestrator():
+        """Run the BPP orchestrator main loop in a separate thread"""
         try:
             logger.info("Starting BPP Orchestrator background task...")
-            loop.run_until_complete(orchestrator.start_polling())
+            # Import and run the main function
+            from services.bpp_orchestrator import main
+            main()
         except Exception as e:
             logger.error(f"BPP Orchestrator error: {e}", exc_info=True)
-        finally:
-            loop.close()
 
     # Start the background thread
-    bg_thread = threading.Thread(target=run_async_loop, daemon=True)
+    bg_thread = threading.Thread(target=run_bpp_orchestrator, daemon=True)
     bg_thread.start()
     logger.info("BPP Orchestrator background thread started")
 

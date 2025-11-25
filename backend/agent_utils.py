@@ -51,9 +51,30 @@ def get_gemini_json_response(prompt: str, model_name: str = "gemini-2.0-flash-ex
     Returns a dict, handling cases where response might be a list or other structure.
     """
     try:
-        model = genai.GenerativeModel(model_name, generation_config={"response_mime_type": "application/json"})
-        response = model.generate_content(prompt)
-        parsed = json.loads(response.text)
+        model = genai.GenerativeModel(model_name)
+        
+        # Add JSON instruction to prompt to ensure JSON response
+        json_prompt = prompt
+        if "Return a VALID JSON" not in prompt and "return JSON" not in prompt.lower():
+            json_prompt = prompt + "\n\nIMPORTANT: Return ONLY valid JSON, no markdown formatting, no code blocks, no explanations. Just the raw JSON object."
+        
+        # Generate content
+        response = model.generate_content(json_prompt)
+        response_text = response.text.strip()
+        
+        # Remove markdown code blocks if present (```json or ```)
+        if response_text.startswith("```"):
+            lines = response_text.split("\n")
+            # Remove first line if it's ```json or ```
+            if lines[0].strip().startswith("```"):
+                lines = lines[1:]
+            # Remove last line if it's ```
+            if lines and lines[-1].strip() == "```":
+                lines = lines[:-1]
+            response_text = "\n".join(lines).strip()
+        
+        # Parse JSON
+        parsed = json.loads(response_text)
         
         # Handle case where Gemini returns a list instead of dict
         if isinstance(parsed, list):
@@ -71,7 +92,20 @@ def get_gemini_json_response(prompt: str, model_name: str = "gemini-2.0-flash-ex
         
         return parsed
     except json.JSONDecodeError as e:
-        logger.error(f"JSON decode error: {e}, response text: {response.text[:200] if 'response' in locals() else 'N/A'}")
+        logger.error(f"JSON decode error: {e}")
+        # Try to extract JSON from text if it's wrapped
+        try:
+            if 'response' in locals():
+                text = response.text
+                # Try to find JSON object in text
+                start = text.find('{')
+                end = text.rfind('}') + 1
+                if start >= 0 and end > start:
+                    parsed = json.loads(text[start:end])
+                    logger.info("Successfully extracted JSON from wrapped response")
+                    return parsed
+        except Exception as extract_error:
+            logger.error(f"Failed to extract JSON: {extract_error}")
         return {"error": f"JSON decode error: {str(e)}"}
     except Exception as e:
         logger.error(f"Error calling Gemini API for JSON: {e}")

@@ -1,722 +1,672 @@
 """
-BPP Orchestrator Service
+BPP Orchestrator - Polls Supabase for queued workloads and processes them through BPP flow.
 
-This service polls Supabase for queued workloads and processes them through
-the Beckn Protocol BPP flow: DISCOVER → SELECT → INIT → CONFIRM
-
-It extracts the top 3 grid zone recommendations and updates the Supabase
-compute_workloads table with:
-- recommended_1_grid_zone_id
-- recommended_2_grid_zone_id
-- recommended_3_grid_zone_id
-- LLM_select_init_confirm (Gemini summary)
-- bpp_processed = true
-- status = 'pending_user_choice'
+This worker:
+1. Polls Supabase for workloads with status='queued' and bpp_processed=False
+2. For each workload, calls SELECT → INIT → CONFIRM
+3. Summarizes responses with Gemini LLM
+4. Updates Supabase with summary and sets status='running'
 """
 
-import asyncio
-import logging
 import os
+import time
+import logging
 import uuid
+import json
+import requests
 from datetime import datetime, timezone
-from typing import Dict, List, Optional, Any
-import httpx
-from pydantic import BaseModel, Field
 from dotenv import load_dotenv
+from agent_utils import supabase, get_gemini_response
 
 # Load environment variables
 load_dotenv()
 
 # Configure logging
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
 
-# Environment variables
-BPP_BASE_URL = os.getenv('BPP_BASE_URL', 'https://ev-charging.sandbox1.com.com/bpp')
+# Configuration
+# Use the exact URL from test_api.py which works - ALWAYS use this correct URL
+# The working URL is: https://deg-hackathon-bap-sandbox.becknprotocol.io/api
+# Ignore any env var that points to wrong URL (ev-charging.sandbox1.com.com is wrong)
+BPP_BASE_URL = 'https://deg-hackathon-bap-sandbox.becknprotocol.io/api'
+env_bpp_url = os.getenv('BPP_BASE_URL')
+if env_bpp_url:
+    if 'deg-hackathon-bap-sandbox.becknprotocol.io' in env_bpp_url:
+        BPP_BASE_URL = env_bpp_url
+        logger.info(f"Using BPP_BASE_URL from env: {BPP_BASE_URL}")
+    else:
+        logger.warning(f"Ignoring incorrect BPP_BASE_URL env var ({env_bpp_url}) - using hardcoded correct URL: {BPP_BASE_URL}")
+
 BAP_ID = os.getenv('BAP_ID', 'ev-charging.sandbox1.com')
 BAP_URI = os.getenv('BAP_URI', 'https://ev-charging.sandbox1.com.com/bap')
 BPP_ID = os.getenv('BPP_ID', 'ev-charging.sandbox1.com')
-GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
-SUPABASE_URL = os.getenv('SUPABASE_URL')
-SUPABASE_KEY = os.getenv('SUPABASE_KEY')
 POLL_INTERVAL = int(os.getenv('BPP_POLL_INTERVAL', '10'))  # seconds
+MAX_WORKLOADS_PER_CYCLE = int(os.getenv('MAX_BPP_WORKLOADS_PER_CYCLE', '5'))
 
-# Initialize Supabase client
-try:
-    from supabase import create_client, Client
-    supabase: Optional[Client] = create_client(SUPABASE_URL, SUPABASE_KEY) if SUPABASE_URL and SUPABASE_KEY else None
-except Exception as e:
-    logger.error(f"Failed to initialize Supabase client: {e}")
-    supabase = None
+# Disable SSL warnings for sandbox
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-
-# Pydantic Models for type safety
-class BecknContext(BaseModel):
-    version: str = "2.0.0"
-    action: str
-    domain: str = "beckn.one:DEG:compute-energy:1.0"
-    timestamp: str
-    message_id: str
-    transaction_id: str
-    bap_id: str
-    bap_uri: str
-    bpp_id: Optional[str] = None
-    bpp_uri: Optional[str] = None
-    ttl: str = "PT30S"
-    schema_context: List[str] = [
-        "https://raw.githubusercontent.com/beckn/protocol-specifications-new/refs/heads/draft/schema/ComputeEnergy/v1/context.jsonld"
-    ]
+# Log configuration on startup
+logger.info(f"BPP_BASE_URL configured: {BPP_BASE_URL}")
 
 
-class GridRecommendation(BaseModel):
-    item_id: str
-    grid_zone: str
-    grid_area: str
-    locality: str
-    renewable_mix: float
-    carbon_intensity: float
-    time_window_start: str
-    time_window_end: str
-    available_capacity: float
-    price: Optional[float] = None
-    grid_zone_id: Optional[str] = None  # UUID from Supabase
+def get_grid_zone_item_id(grid_zone_id: str) -> str:
+    """
+    Get the Beckn item_id for a grid zone.
+    For now, we'll use a simple mapping or default value.
+    In production, this would query a mapping table.
+    """
+    if not grid_zone_id:
+        return "consumer-resource-office-003"  # Default fallback
+    
+    # Try to get item_id from compute_windows or grid_zones table
+    try:
+        # Query for compute windows with this grid_zone_id
+        result = supabase.table("compute_windows")\
+            .select("item_id")\
+            .eq("grid_zone_id", grid_zone_id)\
+            .limit(1)\
+            .execute()
+        
+        if result.data and len(result.data) > 0:
+            return result.data[0].get('item_id', 'consumer-resource-office-003')
+    except Exception as e:
+        logger.warning(f"Could not lookup item_id for grid_zone_id {grid_zone_id}: {e}")
+    
+    # Default fallback
+    return "consumer-resource-office-003"
 
 
-class BPPOrchestrator:
-    """Orchestrates the Beckn Protocol BPP flow for compute workloads"""
-
-    def __init__(self):
-        self.http_client = httpx.AsyncClient(timeout=30.0)
-        self.running = False
-
-    async def start_polling(self):
-        """Start the background polling task"""
-        self.running = True
-        logger.info(f"BPP Orchestrator started. Polling every {POLL_INTERVAL} seconds.")
-
-        while self.running:
-            try:
-                await self.poll_queued_jobs()
-            except Exception as e:
-                logger.error(f"Error in polling cycle: {e}", exc_info=True)
-
-            await asyncio.sleep(POLL_INTERVAL)
-
-    def stop_polling(self):
-        """Stop the background polling task"""
-        self.running = False
-        logger.info("BPP Orchestrator stopped.")
-
-    async def poll_queued_jobs(self):
-        """Poll Supabase for queued workloads that need BPP processing"""
-        if not supabase:
-            logger.warning("Supabase client not initialized. Skipping poll.")
-            return
-
-        try:
-            # Query for queued workloads that haven't been processed by BPP
-            result = supabase.table("compute_workloads")\
-                .select("*")\
-                .eq("status", "queued")\
-                .eq("bpp_processed", False)\
-                .order("submitted_at", desc=False)\
-                .limit(5)\
-                .execute()
-
-            if not result.data:
-                logger.debug("No queued workloads found for BPP processing")
-                return
-
-            logger.info(f"Found {len(result.data)} queued workload(s) for BPP processing")
-
-            for workload in result.data:
-                try:
-                    await self.process_queued_job(workload)
-                except Exception as e:
-                    logger.error(f"Error processing workload {workload.get('id')}: {e}", exc_info=True)
-                    # Mark as failed
-                    await self._mark_workload_failed(workload.get('id'), str(e))
-
-        except Exception as e:
-            # Handle case where bpp_processed column doesn't exist
-            if "column" in str(e).lower() and "bpp_processed" in str(e).lower():
-                logger.warning("bpp_processed column does not exist. Creating it...")
-                await self._create_bpp_processed_column()
-            else:
-                logger.error(f"Error querying queued workloads: {e}", exc_info=True)
-
-    async def process_queued_job(self, workload: Dict[str, Any]):
-        """Process a single queued workload through the BPP flow"""
-        workload_id = workload.get('id')
-        workload_name = workload.get('workload_name', 'Unnamed Workload')
-
-        logger.info(f"Processing workload {workload_id}: {workload_name}")
-
-        # Step 1: DISCOVER - Get available grid windows
-        logger.debug(f"[{workload_id}] Step 1: Calling DISCOVER")
-        discover_response = await self.call_discover(workload)
-
-        if not discover_response:
-            raise Exception("DISCOVER call failed")
-
-        # Step 2: Extract top 3 recommendations from DISCOVER response
-        logger.debug(f"[{workload_id}] Step 2: Extracting top 3 recommendations")
-        recommendations = self._extract_top_recommendations(discover_response, top_n=3)
-
-        if len(recommendations) < 3:
-            logger.warning(f"[{workload_id}] Only {len(recommendations)} recommendations found, expected 3")
-
-        # Step 3: SELECT - Select the first recommendation
-        logger.debug(f"[{workload_id}] Step 3: Calling SELECT")
-        transaction_id = discover_response.get('context', {}).get('transaction_id')
-        select_response = await self.call_select(workload, recommendations[0] if recommendations else None, transaction_id)
-
-        # Step 4: INIT
-        logger.debug(f"[{workload_id}] Step 4: Calling INIT")
-        init_response = await self.call_init(workload, recommendations[0] if recommendations else None, transaction_id)
-
-        # Step 5: CONFIRM
-        logger.debug(f"[{workload_id}] Step 5: Calling CONFIRM")
-        confirm_response = await self.call_confirm(workload, recommendations[0] if recommendations else None, transaction_id)
-
-        # Step 6: Summarize with Gemini
-        logger.debug(f"[{workload_id}] Step 6: Generating Gemini summary")
-        llm_summary = await self.summarize_with_gemini(
-            discover_response,
-            select_response,
-            init_response,
-            confirm_response
-        )
-
-        # Step 7: Map grid zones to Supabase UUIDs
-        logger.debug(f"[{workload_id}] Step 7: Mapping grid zones to UUIDs")
-        await self._map_grid_zone_uuids(recommendations)
-
-        # Step 8: Update Supabase with results
-        logger.debug(f"[{workload_id}] Step 8: Updating Supabase")
-        await self.update_supabase_with_recommendations(
-            workload_id,
-            recommendations,
-            llm_summary
-        )
-
-        logger.info(f"✓ Successfully processed workload {workload_id}")
-
-    async def call_discover(self, workload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """Call the BPP DISCOVER endpoint"""
-        try:
-            timestamp = datetime.now(timezone.utc).isoformat()
-            message_id = str(uuid.uuid4())
-            transaction_id = str(uuid.uuid4())
-
-            # Build DISCOVER request
-            discover_request = {
-                "context": {
-                    "version": "2.0.0",
-                    "action": "discover",
-                    "domain": "beckn.one:DEG:compute-energy:1.0",
-                    "timestamp": timestamp,
-                    "message_id": message_id,
-                    "transaction_id": transaction_id,
-                    "bap_id": BAP_ID,
-                    "bap_uri": BAP_URI,
-                    "ttl": "PT30S",
-                    "schema_context": [
-                        "https://raw.githubusercontent.com/beckn/protocol-specifications-new/refs/heads/draft/schema/ComputeEnergy/v1/context.jsonld"
-                    ]
-                },
-                "message": {
-                    "text_search": f"Grid flexibility windows for {workload.get('workload_name', 'compute workload')}",
-                    "filters": {
-                        "type": "jsonpath",
-                        "expression": "$[?(@.beckn:itemAttributes.beckn:gridParameters.renewableMix >= 30)]"
-                    }
-                }
-            }
-
-            logger.debug(f"Sending DISCOVER request to {BPP_BASE_URL}/discover")
-            response = await self.http_client.post(
-                f"{BPP_BASE_URL}/discover",
-                json=discover_request
-            )
-            response.raise_for_status()
-
-            response_data = response.json()
-            logger.debug(f"DISCOVER response received: {len(response_data.get('message', {}).get('catalogs', []))} catalog(s)")
-
-            # Store transaction_id for later steps
-            response_data['context']['transaction_id'] = transaction_id
-
-            return response_data
-
-        except Exception as e:
-            logger.error(f"DISCOVER call failed: {e}", exc_info=True)
-            return None
-
-    def _extract_top_recommendations(self, discover_response: Dict[str, Any], top_n: int = 3) -> List[GridRecommendation]:
-        """Extract and rank top N grid zone recommendations from DISCOVER response"""
-        try:
-            catalogs = discover_response.get('message', {}).get('catalogs', [])
-            if not catalogs:
-                return []
-
-            # Extract all items from all catalogs
-            all_items = []
-            for catalog in catalogs:
-                items = catalog.get('beckn:items', [])
-                for item in items:
-                    item_attrs = item.get('beckn:itemAttributes', {})
-                    grid_params = item_attrs.get('beckn:gridParameters', {})
-                    time_window = item_attrs.get('beckn:timeWindow', {})
-                    location = item.get('beckn:availableAt', [{}])[0] if item.get('beckn:availableAt') else {}
-                    address = location.get('address', {})
-
-                    # Extract relevant data
-                    renewable_mix = grid_params.get('renewableMix', 0)
-                    carbon_intensity = grid_params.get('carbonIntensity', 999)
-
-                    all_items.append({
-                        'item': item,
-                        'item_id': item.get('beckn:id'),
-                        'grid_zone': grid_params.get('gridZone', 'UNKNOWN'),
-                        'grid_area': grid_params.get('gridArea', 'UNKNOWN'),
-                        'locality': address.get('addressLocality', 'UNKNOWN'),
-                        'renewable_mix': renewable_mix,
-                        'carbon_intensity': carbon_intensity,
-                        'time_window_start': time_window.get('start', ''),
-                        'time_window_end': time_window.get('end', ''),
-                        'available_capacity': item_attrs.get('beckn:capacityParameters', {}).get('availableCapacity', 0),
-                        'score': renewable_mix - (carbon_intensity / 10)  # Simple scoring: favor high renewables, low carbon
-                    })
-
-            # Sort by score (descending)
-            sorted_items = sorted(all_items, key=lambda x: x['score'], reverse=True)
-
-            # Take top N and convert to GridRecommendation objects
-            recommendations = []
-            for item_data in sorted_items[:top_n]:
-                recommendations.append(GridRecommendation(
-                    item_id=item_data['item_id'],
-                    grid_zone=item_data['grid_zone'],
-                    grid_area=item_data['grid_area'],
-                    locality=item_data['locality'],
-                    renewable_mix=item_data['renewable_mix'],
-                    carbon_intensity=item_data['carbon_intensity'],
-                    time_window_start=item_data['time_window_start'],
-                    time_window_end=item_data['time_window_end'],
-                    available_capacity=item_data['available_capacity']
-                ))
-
-            logger.info(f"Extracted {len(recommendations)} recommendations from BPP DISCOVER response")
-            return recommendations
-
-        except Exception as e:
-            logger.error(f"Failed to extract recommendations: {e}", exc_info=True)
-            return []
-
-    async def call_select(self, workload: Dict[str, Any], recommendation: Optional[GridRecommendation], transaction_id: str) -> Optional[Dict[str, Any]]:
-        """Call the BPP SELECT endpoint"""
-        if not recommendation:
-            logger.warning("No recommendation provided for SELECT call")
-            return None
-
-        try:
-            timestamp = datetime.now(timezone.utc).isoformat()
-            message_id = str(uuid.uuid4())
-            order_id = f"order-{workload.get('id')}-{uuid.uuid4().hex[:8]}"
-
-            select_request = {
-                "context": {
-                    "version": "2.0.0",
-                    "action": "select",
-                    "domain": "beckn.one:DEG:compute-energy:1.0",
-                    "timestamp": timestamp,
-                    "message_id": message_id,
-                    "transaction_id": transaction_id,
-                    "bap_id": BAP_ID,
-                    "bap_uri": BAP_URI,
-                    "bpp_id": BPP_ID,
-                    "bpp_uri": BPP_BASE_URL,
-                    "ttl": "PT30S",
-                    "schema_context": [
-                        "https://raw.githubusercontent.com/beckn/protocol-specifications-new/refs/heads/draft/schema/ComputeEnergy/v1/context.jsonld"
-                    ]
-                },
-                "message": {
-                    "order": {
-                        "@context": "https://raw.githubusercontent.com/beckn/protocol-specifications-new/refs/heads/draft/schema/core/v2/context.jsonld",
-                        "@type": "beckn:Order",
-                        "beckn:id": order_id,
-                        "beckn:orderStatus": "QUOTE_REQUESTED",
-                        "beckn:seller": BPP_ID,
-                        "beckn:buyer": BAP_ID,
-                        "beckn:orderItems": [
-                            {
-                                "@type": "beckn:OrderItem",
-                                "beckn:lineId": f"order-item-{uuid.uuid4().hex[:8]}",
-                                "beckn:orderedItem": recommendation.item_id,
-                                "beckn:quantity": 1
+def call_bpp_select(workload: dict, grid_zone_item_id: str) -> dict:
+    """Call BPP SELECT endpoint"""
+    timestamp = datetime.now(timezone.utc).isoformat()
+    message_id = str(uuid.uuid4())
+    transaction_id = str(uuid.uuid4())
+    order_id = f"order-{workload.get('id')}-{uuid.uuid4().hex[:8]}"
+    
+    select_payload = {
+        "context": {
+            "version": "2.0.0",
+            "action": "select",
+            "domain": "beckn.one:DEG:compute-energy:1.0",
+            "timestamp": timestamp,
+            "message_id": message_id,
+            "transaction_id": transaction_id,
+            "bap_id": BAP_ID,
+            "bap_uri": BAP_URI,
+            "bpp_id": BPP_ID,
+            "bpp_uri": "https://ev-charging.sandbox1.com.com/bpp",
+            "ttl": "PT30S",
+            "schema_context": [
+                "https://raw.githubusercontent.com/beckn/protocol-specifications-new/refs/heads/draft/schema/ComputeEnergy/v1/context.jsonld"
+            ]
+        },
+        "message": {
+            "order": {
+                "@context": "https://raw.githubusercontent.com/beckn/protocol-specifications-new/refs/heads/draft/schema/core/v2/context.jsonld",
+                "@type": "beckn:Order",
+                "beckn:id": order_id,
+                "beckn:orderStatus": "QUOTE_REQUESTED",
+                "beckn:seller": BAP_ID,
+                "beckn:buyer": BAP_ID,
+                "beckn:orderItems": [
+                    {
+                        "@type": "beckn:OrderItem",
+                        "beckn:lineId": "order-item-ce-001",
+                        "beckn:orderedItem": grid_zone_item_id,
+                        "beckn:quantity": 1,
+                        "beckn:acceptedOffer": {
+                            "@context": "https://raw.githubusercontent.com/beckn/protocol-specifications-new/refs/heads/draft/schema/core/v2/context.jsonld",
+                            "@type": "beckn:Offer",
+                            "beckn:id": "offer-ce-cambridge-morning-001",
+                            "beckn:descriptor": {
+                                "@type": "beckn:Descriptor",
+                                "schema:name": "Cambridge-East Morning Window"
+                            },
+                            "beckn:items": [grid_zone_item_id],
+                            "beckn:provider": "gridflex-agent-uk",
+                            "beckn:price": {
+                                "currency": "GBP",
+                                "price": 0.102
+                            },
+                            "beckn:offerAttributes": {
+                                "@context": "https://raw.githubusercontent.com/beckn/protocol-specifications-new/refs/heads/draft/schema/ComputeEnergy/v1/context.jsonld",
+                                "@type": "beckn:ComputeEnergyPricing",
+                                "beckn:unit": "per_kWh",
+                                "beckn:priceStability": "stable"
                             }
-                        ]
+                        }
                     }
-                }
+                ]
             }
+        }
+    }
+    
+    try:
+        url = f"{BPP_BASE_URL}/select"
+        logger.info(f"Calling SELECT: {url}")
+        logger.debug(f"SELECT payload: {json.dumps(select_payload, indent=2)}")
+        response = requests.post(
+            url,
+            json=select_payload,
+            headers={"Content-Type": "application/json"},
+            verify=False,  # Disable SSL verification for sandbox
+            timeout=30
+        )
+        response.raise_for_status()
+        return {"success": True, "data": response.json(), "transaction_id": transaction_id, "order_id": order_id}
+    except Exception as e:
+        logger.error(f"SELECT call failed: {e}")
+        logger.error(f"URL used: {url}")
+        logger.error(f"BPP_BASE_URL env var: {BPP_BASE_URL}")
+        return {"success": False, "error": str(e)}
 
-            logger.debug(f"Sending SELECT request to {BPP_BASE_URL}/select")
-            response = await self.http_client.post(
-                f"{BPP_BASE_URL}/select",
-                json=select_request
-            )
-            response.raise_for_status()
 
-            response_data = response.json()
-            logger.debug(f"SELECT response received")
-            return response_data
-
-        except Exception as e:
-            logger.error(f"SELECT call failed: {e}", exc_info=True)
-            return None
-
-    async def call_init(self, workload: Dict[str, Any], recommendation: Optional[GridRecommendation], transaction_id: str) -> Optional[Dict[str, Any]]:
-        """Call the BPP INIT endpoint"""
-        if not recommendation:
-            logger.warning("No recommendation provided for INIT call")
-            return None
-
-        try:
-            timestamp = datetime.now(timezone.utc).isoformat()
-            message_id = str(uuid.uuid4())
-            order_id = f"order-{workload.get('id')}-{uuid.uuid4().hex[:8]}"
-
-            init_request = {
-                "context": {
-                    "version": "2.0.0",
-                    "action": "init",
-                    "domain": "beckn.one:DEG:compute-energy:1.0",
-                    "timestamp": timestamp,
-                    "message_id": message_id,
-                    "transaction_id": transaction_id,
-                    "bap_id": BAP_ID,
-                    "bap_uri": BAP_URI,
-                    "bpp_id": BPP_ID,
-                    "bpp_uri": BPP_BASE_URL,
-                    "ttl": "PT30S",
-                    "schema_context": [
-                        "https://raw.githubusercontent.com/beckn/protocol-specifications-new/refs/heads/draft/schema/ComputeEnergy/v1/context.jsonld"
-                    ]
+def call_bpp_init(workload: dict, transaction_id: str, order_id: str) -> dict:
+    """Call BPP INIT endpoint"""
+    timestamp = datetime.now(timezone.utc).isoformat()
+    message_id = str(uuid.uuid4())
+    
+    init_payload = {
+        "context": {
+            "version": "2.0.0",
+            "action": "init",
+            "domain": "beckn.one:DEG:compute-energy:1.0",
+            "timestamp": timestamp,
+            "message_id": message_id,
+            "transaction_id": transaction_id,
+            "bap_id": BAP_ID,
+            "bap_uri": BAP_URI,
+            "bpp_id": BPP_ID,
+            "bpp_uri": "https://ev-charging.sandbox1.com.com/bpp",
+            "ttl": "PT30S",
+            "schema_context": [
+                "https://raw.githubusercontent.com/beckn/protocol-specifications-new/refs/heads/draft/schema/ComputeEnergy/v1/context.jsonld"
+            ]
+        },
+        "message": {
+            "order": {
+                "@context": "https://raw.githubusercontent.com/beckn/protocol-specifications-new/refs/heads/draft/schema/core/v2/context.jsonld",
+                "@type": "beckn:Order",
+                "beckn:id": order_id,
+                "beckn:orderStatus": "INITIALIZED",
+                "beckn:seller": "provider-gridflex-001",
+                "beckn:buyer": "buyer-compflex-001",
+                "beckn:invoice": {
+                    "@context": "https://raw.githubusercontent.com/beckn/protocol-specifications-new/refs/heads/draft/schema/core/v2/context.jsonld",
+                    "@type": "schema:Invoice",
+                    "schema:customer": {
+                        "email": "user@computecloud.ai",
+                        "phone": "+44 7911 123456",
+                        "legalName": "ComputeCloud.ai",
+                        "address": {
+                            "streetAddress": "123 Main St",
+                            "addressLocality": "Cambridge",
+                            "addressRegion": "East England",
+                            "postalCode": "CB1 2AB",
+                            "addressCountry": "GB"
+                        }
+                    }
                 },
-                "message": {
-                    "order": {
-                        "@context": "https://raw.githubusercontent.com/beckn/protocol-specifications-new/refs/heads/draft/schema/core/v2/context.jsonld",
-                        "@type": "beckn:Order",
-                        "beckn:id": order_id,
-                        "beckn:orderStatus": "INITIALIZED",
-                        "beckn:seller": BPP_ID,
-                        "beckn:buyer": BAP_ID
-                    }
-                }
-            }
-
-            logger.debug(f"Sending INIT request to {BPP_BASE_URL}/init")
-            response = await self.http_client.post(
-                f"{BPP_BASE_URL}/init",
-                json=init_request
-            )
-            response.raise_for_status()
-
-            response_data = response.json()
-            logger.debug(f"INIT response received")
-            return response_data
-
-        except Exception as e:
-            logger.error(f"INIT call failed: {e}", exc_info=True)
-            return None
-
-    async def call_confirm(self, workload: Dict[str, Any], recommendation: Optional[GridRecommendation], transaction_id: str) -> Optional[Dict[str, Any]]:
-        """Call the BPP CONFIRM endpoint"""
-        if not recommendation:
-            logger.warning("No recommendation provided for CONFIRM call")
-            return None
-
-        try:
-            timestamp = datetime.now(timezone.utc).isoformat()
-            message_id = str(uuid.uuid4())
-            order_id = f"order-{workload.get('id')}-{uuid.uuid4().hex[:8]}"
-
-            confirm_request = {
-                "context": {
-                    "version": "2.0.0",
-                    "action": "confirm",
-                    "domain": "beckn.one:DEG:compute-energy:1.0",
-                    "timestamp": timestamp,
-                    "message_id": message_id,
-                    "transaction_id": transaction_id,
-                    "bap_id": BAP_ID,
-                    "bap_uri": BAP_URI,
-                    "bpp_id": BPP_ID,
-                    "bpp_uri": BPP_BASE_URL,
-                    "ttl": "PT30S",
-                    "schema_context": [
-                        "https://raw.githubusercontent.com/beckn/protocol-specifications-new/refs/heads/draft/schema/ComputeEnergy/v1/context.jsonld"
-                    ]
-                },
-                "message": {
-                    "order": {
-                        "@context": "https://raw.githubusercontent.com/beckn/protocol-specifications-new/refs/heads/draft/schema/core/v2/context.jsonld",
-                        "@type": "beckn:Order",
-                        "beckn:id": order_id,
-                        "beckn:orderStatus": "CONFIRMED",
-                        "beckn:seller": BPP_ID,
-                        "beckn:buyer": BAP_ID
-                    }
-                }
-            }
-
-            logger.debug(f"Sending CONFIRM request to {BPP_BASE_URL}/confirm")
-            response = await self.http_client.post(
-                f"{BPP_BASE_URL}/confirm",
-                json=confirm_request
-            )
-            response.raise_for_status()
-
-            response_data = response.json()
-            logger.debug(f"CONFIRM response received")
-            return response_data
-
-        except Exception as e:
-            logger.error(f"CONFIRM call failed: {e}", exc_info=True)
-            return None
-
-    async def summarize_with_gemini(
-        self,
-        discover_response: Dict[str, Any],
-        select_response: Optional[Dict[str, Any]],
-        init_response: Optional[Dict[str, Any]],
-        confirm_response: Optional[Dict[str, Any]]
-    ) -> str:
-        """Generate a summary of the BPP flow using Gemini LLM"""
-        try:
-            import google.generativeai as genai
-
-            if not GEMINI_API_KEY:
-                logger.warning("GEMINI_API_KEY not configured, skipping summary")
-                return "Gemini API key not configured"
-
-            genai.configure(api_key=GEMINI_API_KEY)
-            model = genai.GenerativeModel('gemini-pro')
-
-            # Build prompt
-            prompt = f"""
-            Summarize the following Beckn Protocol BPP flow for a compute workload scheduling request.
-
-            DISCOVER Response:
-            {discover_response}
-
-            SELECT Response:
-            {select_response}
-
-            INIT Response:
-            {init_response}
-
-            CONFIRM Response:
-            {confirm_response}
-
-            Please provide a concise 2-3 sentence summary covering:
-            1. How many grid zones were discovered
-            2. Which zone was selected and why
-            3. The final booking status
-            """
-
-            response = model.generate_content(prompt)
-            summary = response.text.strip()
-
-            logger.debug(f"Gemini summary generated: {summary[:100]}...")
-            return summary
-
-        except Exception as e:
-            logger.error(f"Gemini summarization failed: {e}", exc_info=True)
-            return f"Failed to generate summary: {str(e)}"
-
-    async def _map_grid_zone_uuids(self, recommendations: List[GridRecommendation]):
-        """Map grid zone names to Supabase grid_zone UUIDs"""
-        if not supabase:
-            return
-
-        for rec in recommendations:
-            try:
-                # Try to find matching grid zone in Supabase
-                # Try multiple fields: gridZone, gridArea, locality
-                result = None
-
-                # Try grid_zone_code first
-                if rec.grid_zone and rec.grid_zone != 'UNKNOWN':
-                    result = supabase.table("grid_zones").select("id").eq("grid_zone_code", rec.grid_zone).limit(1).execute()
-
-                # Try zone_name
-                if not result or not result.data:
-                    result = supabase.table("grid_zones").select("id").eq("zone_name", rec.grid_area).limit(1).execute()
-
-                # Try locality
-                if not result or not result.data:
-                    result = supabase.table("grid_zones").select("id").eq("locality", rec.locality).limit(1).execute()
-
-                # Try region
-                if not result or not result.data:
-                    result = supabase.table("grid_zones").select("id").eq("region", rec.locality).limit(1).execute()
-
-                if result and result.data:
-                    rec.grid_zone_id = result.data[0]['id']
-                    logger.debug(f"Mapped {rec.grid_zone} to UUID {rec.grid_zone_id}")
-                else:
-                    logger.warning(f"Could not find grid_zone UUID for {rec.grid_zone}/{rec.grid_area}/{rec.locality}")
-                    # Fallback: get first available grid zone
-                    fallback = supabase.table("grid_zones").select("id").limit(1).execute()
-                    if fallback and fallback.data:
-                        rec.grid_zone_id = fallback.data[0]['id']
-                        logger.warning(f"Using fallback grid_zone_id: {rec.grid_zone_id}")
-
-            except Exception as e:
-                logger.error(f"Error mapping grid_zone UUID for {rec.grid_zone}: {e}")
-
-    async def update_supabase_with_recommendations(
-        self,
-        workload_id: str,
-        recommendations: List[GridRecommendation],
-        llm_summary: str
-    ):
-        """Update Supabase compute_workloads with BPP recommendations"""
-        if not supabase:
-            logger.error("Supabase client not initialized")
-            return
-
-        try:
-            # Ensure we have exactly 3 recommendations
-            while len(recommendations) < 3:
-                # Duplicate last recommendation if needed
-                if recommendations:
-                    recommendations.append(recommendations[-1])
-                else:
-                    # Create placeholder
-                    recommendations.append(GridRecommendation(
-                        item_id="placeholder",
-                        grid_zone="UNKNOWN",
-                        grid_area="UNKNOWN",
-                        locality="UNKNOWN",
-                        renewable_mix=0,
-                        carbon_intensity=999,
-                        time_window_start="",
-                        time_window_end="",
-                        available_capacity=0
-                    ))
-
-            update_data = {
-                "recommended_1_grid_zone_id": recommendations[0].grid_zone_id,
-                "recommended_2_grid_zone_id": recommendations[1].grid_zone_id,
-                "recommended_3_grid_zone_id": recommendations[2].grid_zone_id,
-                "LLM_select_init_confirm": llm_summary,
-                "bpp_processed": True,
-                "status": "pending_user_choice",
-                "updated_at": datetime.now(timezone.utc).isoformat()
-            }
-
-            # Also store additional metadata
-            update_data["metadata"] = {
-                "bpp_recommendations": [
+                "beckn:orderItems": [
                     {
-                        "rank": 1,
-                        "grid_zone": recommendations[0].grid_zone,
-                        "grid_area": recommendations[0].grid_area,
-                        "locality": recommendations[0].locality,
-                        "renewable_mix": recommendations[0].renewable_mix,
-                        "carbon_intensity": recommendations[0].carbon_intensity,
-                        "time_window_start": recommendations[0].time_window_start,
-                        "time_window_end": recommendations[0].time_window_end
-                    },
-                    {
-                        "rank": 2,
-                        "grid_zone": recommendations[1].grid_zone,
-                        "grid_area": recommendations[1].grid_area,
-                        "locality": recommendations[1].locality,
-                        "renewable_mix": recommendations[1].renewable_mix,
-                        "carbon_intensity": recommendations[1].carbon_intensity,
-                        "time_window_start": recommendations[1].time_window_start,
-                        "time_window_end": recommendations[1].time_window_end
-                    },
-                    {
-                        "rank": 3,
-                        "grid_zone": recommendations[2].grid_zone,
-                        "grid_area": recommendations[2].grid_area,
-                        "locality": recommendations[2].locality,
-                        "renewable_mix": recommendations[2].renewable_mix,
-                        "carbon_intensity": recommendations[2].carbon_intensity,
-                        "time_window_start": recommendations[2].time_window_start,
-                        "time_window_end": recommendations[2].time_window_end
+                        "@type": "beckn:OrderItem",
+                        "beckn:lineId": "order-item-ce-001",
+                        "beckn:orderedItem": "consumer-resource-office-003",
+                        "beckn:quantity": 1,
+                        "beckn:acceptedOffer": {
+                            "@context": "https://raw.githubusercontent.com/beckn/protocol-specifications-new/refs/heads/draft/schema/core/v2/context.jsonld",
+                            "@type": "beckn:Offer",
+                            "beckn:id": "offer-ce-cambridge-morning-001",
+                            "beckn:descriptor": {
+                                "@type": "beckn:Descriptor",
+                                "schema:name": "Cambridge Morning Compute Slot"
+                            },
+                            "beckn:provider": "provider-gridflex-001",
+                            "beckn:items": ["item-ce-cambridge-morning-001"],
+                            "beckn:price": {
+                                "currency": "GBP",
+                                "price": 0.102
+                            },
+                            "beckn:offerAttributes": {
+                                "@context": "https://raw.githubusercontent.com/beckn/protocol-specifications-new/refs/heads/draft/schema/ComputeEnergy/v1/context.jsonld",
+                                "@type": "beckn:ComputeEnergyPricing",
+                                "beckn:unit": "per_kWh",
+                                "beckn:priceStability": "stable"
+                            }
+                        }
                     }
                 ],
-                "bpp_flow_summary": llm_summary
+                "beckn:fulfillment": {
+                    "@context": "https://raw.githubusercontent.com/beckn/protocol-specifications-new/refs/heads/draft/schema/core/v2/context.jsonld",
+                    "@type": "beckn:Fulfillment",
+                    "beckn:id": "fulfillment-ce-cambridge-001",
+                    "beckn:mode": "GRID-BASED",
+                    "beckn:status": "PENDING",
+                    "beckn:deliveryAttributes": {
+                        "@context": "https://raw.githubusercontent.com/beckn/protocol-specifications-new/refs/heads/draft/schema/ComputeEnergy/v1/context.jsonld",
+                        "@type": "beckn:ComputeEnergyFulfillment",
+                        "beckn:computeLoad": workload.get('estimated_energy_kwh', 1.2),
+                        "beckn:computeLoadUnit": "MW",
+                        "beckn:location": {
+                            "@type": "beckn:Location",
+                            "geo": {
+                                "type": "Point",
+                                "coordinates": [0.1218, 52.2053]
+                            },
+                            "address": {
+                                "streetAddress": "ComputeCloud Data Centre",
+                                "addressLocality": "Cambridge",
+                                "addressRegion": "East England",
+                                "postalCode": "CB1 2AB",
+                                "addressCountry": "GB"
+                            }
+                        },
+                        "beckn:timeWindow": {
+                            "start": datetime.now(timezone.utc).isoformat(),
+                            "end": datetime.now(timezone.utc).isoformat()
+                        },
+                        "beckn:workloadMetadata": {
+                            "workloadType": workload.get('workload_type', 'AI_TRAINING'),
+                            "workloadId": workload.get('id'),
+                            "gpuHours": workload.get('required_gpu_mins', 0) / 60 if workload.get('required_gpu_mins') else 0,
+                            "carbonBudget": workload.get('carbon_cap_gco2', 0) / 1000 if workload.get('carbon_cap_gco2') else 0,
+                            "carbonBudgetUnit": "kgCO2"
+                        }
+                    }
+                },
+                "beckn:orderAttributes": {
+                    "@context": "https://raw.githubusercontent.com/beckn/protocol-specifications-new/refs/heads/draft/schema/ComputeEnergy/v1/context.jsonld",
+                    "@type": "beckn:ComputeEnergyOrder",
+                    "beckn:requestType": "compute_slot_reservation",
+                    "beckn:priority": workload.get('urgency', 'medium').lower(),
+                    "beckn:flexibilityLevel": "high" if workload.get('is_deferrable') else "medium"
+                }
             }
+        }
+    }
+    
+    try:
+        url = f"{BPP_BASE_URL}/init"
+        logger.info(f"Calling INIT: {url}")
+        response = requests.post(
+            url,
+            json=init_payload,
+            headers={"Content-Type": "application/json"},
+            verify=False,
+            timeout=30
+        )
+        response.raise_for_status()
+        return {"success": True, "data": response.json()}
+    except Exception as e:
+        logger.error(f"INIT call failed: {e}")
+        logger.error(f"URL used: {url}")
+        return {"success": False, "error": str(e)}
 
-            supabase.table("compute_workloads").update(update_data).eq("id", workload_id).execute()
 
-            logger.info(f"✓ Updated workload {workload_id} with BPP recommendations:")
-            logger.info(f"  - Rec 1: {recommendations[0].grid_zone} (UUID: {recommendations[0].grid_zone_id})")
-            logger.info(f"  - Rec 2: {recommendations[1].grid_zone} (UUID: {recommendations[1].grid_zone_id})")
-            logger.info(f"  - Rec 3: {recommendations[2].grid_zone} (UUID: {recommendations[2].grid_zone_id})")
+def call_bpp_confirm(workload: dict, transaction_id: str, order_id: str) -> dict:
+    """Call BPP CONFIRM endpoint"""
+    timestamp = datetime.now(timezone.utc).isoformat()
+    message_id = str(uuid.uuid4())
+    confirmation_timestamp = timestamp
+    
+    confirm_payload = {
+        "context": {
+            "version": "2.0.0",
+            "action": "confirm",
+            "domain": "beckn.one:DEG:compute-energy:1.0",
+            "timestamp": timestamp,
+            "message_id": message_id,
+            "transaction_id": transaction_id,
+            "bap_id": BAP_ID,
+            "bap_uri": BAP_URI,
+            "bpp_id": BPP_ID,
+            "bpp_uri": "https://ev-charging.sandbox1.com.com/bpp",
+            "ttl": "PT30S",
+            "schema_context": [
+                "https://raw.githubusercontent.com/beckn/protocol-specifications-new/refs/heads/draft/schema/ComputeEnergy/v1/context.jsonld"
+            ]
+        },
+        "message": {
+            "order": {
+                "@context": "https://raw.githubusercontent.com/beckn/protocol-specifications-new/refs/heads/draft/schema/core/v2/context.jsonld",
+                "@type": "beckn:Order",
+                "beckn:id": order_id,
+                "beckn:orderStatus": "PENDING",
+                "beckn:seller": "gridflex-agent-uk",
+                "beckn:buyer": "compflex-buyer-001",
+                "beckn:invoice": {
+                    "@context": "https://raw.githubusercontent.com/beckn/protocol-specifications-new/refs/heads/draft/schema/core/v2/context.jsonld",
+                    "@type": "schema:Invoice",
+                    "schema:customer": {
+                        "email": "user@computecloud.ai",
+                        "phone": "+44 7911 123456",
+                        "legalName": "ComputeCloud.ai",
+                        "address": {
+                            "streetAddress": "123 Main St",
+                            "addressLocality": "Cambridge",
+                            "addressRegion": "East England",
+                            "postalCode": "CB1 2AB",
+                            "addressCountry": "GB"
+                        }
+                    }
+                },
+                "beckn:orderItems": [
+                    {
+                        "@type": "beckn:OrderItem",
+                        "beckn:lineId": "order-item-ce-001",
+                        "beckn:orderedItem": "item-ce-manchester-afternoon-001",
+                        "beckn:quantity": 1,
+                        "beckn:acceptedOffer": {
+                            "@context": "https://raw.githubusercontent.com/beckn/protocol-specifications-new/refs/heads/draft/schema/core/v2/context.jsonld",
+                            "@type": "beckn:Offer",
+                            "beckn:id": "offer-ce-cambridge-morning-001",
+                            "beckn:descriptor": {
+                                "@type": "beckn:Descriptor",
+                                "schema:name": "Cambridge Morning Compute Slot"
+                            },
+                            "beckn:provider": "provider-gridflex-001",
+                            "beckn:items": ["item-ce-cambridge-morning-001"],
+                            "beckn:price": {
+                                "currency": "GBP",
+                                "price": 0.102
+                            },
+                            "beckn:offerAttributes": {
+                                "@context": "https://raw.githubusercontent.com/beckn/protocol-specifications-new/refs/heads/draft/schema/ComputeEnergy/v1/context.jsonld",
+                                "@type": "beckn:ComputeEnergyPricing",
+                                "beckn:unit": "per_kWh",
+                                "beckn:priceStability": "stable"
+                            }
+                        },
+                        "beckn:orderItemAttributes": {
+                            "@context": "https://raw.githubusercontent.com/beckn/protocol-specifications-new/refs/heads/draft/schema/ComputeEnergy/v1/context.jsonld",
+                            "@type": "beckn:ComputeEnergyWindow",
+                            "beckn:slotId": f"slot-{workload.get('id')}",
+                            "beckn:gridParameters": {
+                                "gridArea": "Cambridge-East",
+                                "gridZone": "UK-EAST-1",
+                                "renewableMix": 80,
+                                "carbonIntensity": 120,
+                                "carbonIntensityUnit": "gCO2/kWh",
+                                "frequency": 50,
+                                "frequencyUnit": "Hz"
+                            },
+                            "beckn:timeWindow": {
+                                "start": datetime.now(timezone.utc).isoformat(),
+                                "end": datetime.now(timezone.utc).isoformat(),
+                                "duration": "PT4H"
+                            },
+                            "beckn:capacityParameters": {
+                                "availableCapacity": 3.8,
+                                "capacityUnit": "MW",
+                                "reservedCapacity": 1.2
+                            },
+                            "beckn:pricingParameters": {
+                                "currency": "GBP",
+                                "unit": "per_kWh",
+                                "spotPrice": 0.102,
+                                "priceStability": "stable",
+                                "estimatedCost": 489.6
+                            }
+                        }
+                    }
+                ],
+                "beckn:fulfillment": {
+                    "@context": "https://raw.githubusercontent.com/beckn/protocol-specifications-new/refs/heads/draft/schema/core/v2/context.jsonld",
+                    "@type": "beckn:Fulfillment",
+                    "beckn:id": "fulfillment-ce-cambridge-001",
+                    "beckn:mode": "GRID-BASED",
+                    "beckn:status": "CONFIRMED",
+                    "beckn:deliveryAttributes": {
+                        "@context": "https://raw.githubusercontent.com/beckn/protocol-specifications-new/refs/heads/draft/schema/ComputeEnergy/v1/context.jsonld",
+                        "@type": "beckn:ComputeEnergyFulfillment",
+                        "beckn:computeLoad": workload.get('estimated_energy_kwh', 1.2),
+                        "beckn:computeLoadUnit": "MW",
+                        "beckn:location": {
+                            "@type": "beckn:Location",
+                            "geo": {
+                                "type": "Point",
+                                "coordinates": [0.1218, 52.2053]
+                            },
+                            "address": {
+                                "streetAddress": "ComputeCloud Data Centre",
+                                "addressLocality": "Cambridge",
+                                "addressRegion": "East England",
+                                "postalCode": "CB1 2AB",
+                                "addressCountry": "GB"
+                            }
+                        },
+                        "beckn:timeWindow": {
+                            "start": datetime.now(timezone.utc).isoformat(),
+                            "end": datetime.now(timezone.utc).isoformat()
+                        },
+                        "beckn:workloadMetadata": {
+                            "workloadType": workload.get('workload_type', 'AI_TRAINING'),
+                            "workloadId": workload.get('id'),
+                            "gpuHours": workload.get('required_gpu_mins', 0) / 60 if workload.get('required_gpu_mins') else 0,
+                            "carbonBudget": workload.get('carbon_cap_gco2', 0) / 1000 if workload.get('carbon_cap_gco2') else 0,
+                            "carbonBudgetUnit": "kgCO2"
+                        },
+                        "beckn:confirmationTimestamp": confirmation_timestamp
+                    }
+                },
+                "beckn:orderAttributes": {
+                    "@context": "https://raw.githubusercontent.com/beckn/protocol-specifications-new/refs/heads/draft/schema/ComputeEnergy/v1/context.jsonld",
+                    "@type": "beckn:ComputeEnergyOrder",
+                    "beckn:requestType": "compute_slot_reservation",
+                    "beckn:priority": workload.get('urgency', 'medium').lower(),
+                    "beckn:flexibilityLevel": "high" if workload.get('is_deferrable') else "medium",
+                    "beckn:confirmationTimestamp": confirmation_timestamp
+                },
+                "beckn:payment": {
+                    "@context": "https://raw.githubusercontent.com/beckn/protocol-specifications-new/refs/heads/draft/schema/ComputeEnergy/v1/context.jsonld",
+                    "@type": "beckn:ComputeEnergyPayment",
+                    "beckn:settlement": "next-billing-cycle"
+                }
+            }
+        }
+    }
+    
+    try:
+        url = f"{BPP_BASE_URL}/confirm"
+        logger.info(f"Calling CONFIRM: {url}")
+        response = requests.post(
+            url,
+            json=confirm_payload,
+            headers={"Content-Type": "application/json"},
+            verify=False,
+            timeout=30
+        )
+        response.raise_for_status()
+        return {"success": True, "data": response.json()}
+    except Exception as e:
+        logger.error(f"CONFIRM call failed: {e}")
+        logger.error(f"URL used: {url}")
+        return {"success": False, "error": str(e)}
 
-        except Exception as e:
-            # Handle case where columns don't exist
-            if "column" in str(e).lower():
-                if "bpp_processed" in str(e).lower():
-                    await self._create_bpp_processed_column()
-                if "LLM_select_init_confirm" in str(e).lower():
-                    await self._create_llm_summary_column()
-                # Retry update
-                await self.update_supabase_with_recommendations(workload_id, recommendations, llm_summary)
-            else:
-                logger.error(f"Failed to update Supabase: {e}", exc_info=True)
-                raise
 
-    async def _mark_workload_failed(self, workload_id: str, error_message: str):
-        """Mark a workload as failed in Supabase"""
-        if not supabase:
-            return
+def summarize_responses(select_response: dict, init_response: dict, confirm_response: dict) -> str:
+    """Summarize the three BPP responses using Gemini LLM"""
+    try:
+        prompt = f"""
+        Summarize the following Beckn Protocol BPP flow for a compute workload scheduling request.
 
+        SELECT Response:
+        {json.dumps(select_response, indent=2) if select_response else "None"}
+
+        INIT Response:
+        {json.dumps(init_response, indent=2) if init_response else "None"}
+
+        CONFIRM Response:
+        {json.dumps(confirm_response, indent=2) if confirm_response else "None"}
+
+        Please provide a concise 2-3 sentence summary covering:
+        1. Which grid zone was selected
+        2. The initialization status
+        3. The final confirmation status
+        """
+        
+        summary = get_gemini_response(prompt)
+        return summary.strip()
+    except Exception as e:
+        logger.error(f"Failed to generate summary: {e}")
+        return f"Summary generation failed: {str(e)}"
+
+
+def process_workload(workload: dict) -> bool:
+    """
+    Process a single queued workload through the BPP flow.
+    
+    Returns True if successful, False otherwise.
+    """
+    workload_id = workload.get('id')
+    workload_name = workload.get('workload_name', 'Unnamed Workload')
+    
+    logger.info(f"Processing workload {workload_id}: {workload_name}")
+    
+    try:
+        # Step 1: Update status to 'scheduled' to prevent double processing
+        supabase.table("compute_workloads").update({
+            "status": "scheduled",
+            "bpp_processed": False,
+            "updated_at": datetime.now(timezone.utc).isoformat()
+        }).eq("id", workload_id).execute()
+        logger.info(f"[{workload_id}] Status updated to 'scheduled'")
+        
+        # Step 2: Get the chosen grid zone from the workload
+        grid_zone_id = workload.get('recommended_grid_zone_id') or workload.get('recommended_1_grid_zone_id')
+        if not grid_zone_id:
+            logger.warning(f"[{workload_id}] No grid_zone_id found, using default")
+            grid_zone_item_id = "consumer-resource-office-003"
+        else:
+            grid_zone_item_id = get_grid_zone_item_id(grid_zone_id)
+            logger.info(f"[{workload_id}] Using grid_zone_item_id: {grid_zone_item_id}")
+        
+        # Step 3: Call SELECT
+        logger.info(f"[{workload_id}] Step 1: Calling SELECT")
+        select_result = call_bpp_select(workload, grid_zone_item_id)
+        if not select_result.get('success'):
+            raise Exception(f"SELECT call failed: {select_result.get('error')}")
+        
+        select_response = select_result.get('data')
+        transaction_id = select_result.get('transaction_id')
+        order_id = select_result.get('order_id')
+        logger.info(f"[{workload_id}] SELECT successful")
+        
+        # Step 4: Call INIT
+        logger.info(f"[{workload_id}] Step 2: Calling INIT")
+        init_result = call_bpp_init(workload, transaction_id, order_id)
+        if not init_result.get('success'):
+            raise Exception(f"INIT call failed: {init_result.get('error')}")
+        
+        init_response = init_result.get('data')
+        logger.info(f"[{workload_id}] INIT successful")
+        
+        # Step 5: Call CONFIRM
+        logger.info(f"[{workload_id}] Step 3: Calling CONFIRM")
+        confirm_result = call_bpp_confirm(workload, transaction_id, order_id)
+        if not confirm_result.get('success'):
+            raise Exception(f"CONFIRM call failed: {confirm_result.get('error')}")
+        
+        confirm_response = confirm_result.get('data')
+        logger.info(f"[{workload_id}] CONFIRM successful")
+        
+        # Step 6: Summarize with Gemini
+        logger.info(f"[{workload_id}] Step 4: Generating summary with Gemini")
+        llm_summary = summarize_responses(select_response, init_response, confirm_response)
+        logger.info(f"[{workload_id}] Summary generated ({len(llm_summary)} chars): {llm_summary[:150]}...")
+        
+        # Step 7: Update Supabase with summary and set status to 'running'
+        logger.info(f"[{workload_id}] Step 5: Updating Supabase with LLM summary")
+        update_result = supabase.table("compute_workloads").update({
+            "LLM_select_init_confirm": llm_summary,
+            "bpp_processed": True,
+            "status": "running",
+            "updated_at": datetime.now(timezone.utc).isoformat()
+        }).eq("id", workload_id).execute()
+        
+        if update_result.data:
+            logger.info(f"✓ Successfully updated workload {workload_id} with LLM summary")
+            logger.debug(f"  Summary length: {len(llm_summary)} characters")
+        else:
+            logger.warning(f"Update returned no data for workload {workload_id}")
+        
+        logger.info(f"✓ Successfully processed workload {workload_id}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Error processing workload {workload_id}: {e}", exc_info=True)
+        
+        # Mark as failed
         try:
             supabase.table("compute_workloads").update({
                 "status": "failed",
                 "bpp_processed": True,
-                "LLM_select_init_confirm": f"Failed: {error_message}",
+                "LLM_select_init_confirm": f"Failed: {str(e)}",
                 "updated_at": datetime.now(timezone.utc).isoformat()
             }).eq("id", workload_id).execute()
-
-            logger.info(f"Marked workload {workload_id} as failed")
-        except Exception as e:
-            logger.error(f"Failed to mark workload as failed: {e}")
-
-    async def _create_bpp_processed_column(self):
-        """Create the bpp_processed column if it doesn't exist"""
-        logger.info("Creating bpp_processed column...")
-        # This would typically be done via a migration, but we'll log it here
-        logger.warning("Please run: ALTER TABLE compute_workloads ADD COLUMN IF NOT EXISTS bpp_processed boolean DEFAULT false;")
-
-    async def _create_llm_summary_column(self):
-        """Create the LLM_select_init_confirm column if it doesn't exist"""
-        logger.info("Creating LLM_select_init_confirm column...")
-        logger.warning("Please run: ALTER TABLE compute_workloads ADD COLUMN IF NOT EXISTS LLM_select_init_confirm text;")
+        except Exception as update_err:
+            logger.error(f"Failed to update workload error status: {update_err}")
+        
+        return False
 
 
-# Global instance
-orchestrator = BPPOrchestrator()
+def poll_and_process_workloads():
+    """Poll Supabase for queued workloads and process them."""
+    if not supabase:
+        logger.error("Supabase client not initialized")
+        return
+    
+    try:
+        # Query for queued workloads that haven't been processed by BPP
+        result = supabase.table("compute_workloads")\
+            .select("*")\
+            .eq("status", "queued")\
+            .eq("bpp_processed", False)\
+            .order("submitted_at", desc=False)\
+            .limit(MAX_WORKLOADS_PER_CYCLE)\
+            .execute()
+        
+        if not result.data:
+            logger.debug("No queued workloads found for BPP processing")
+            return
+        
+        logger.info(f"Found {len(result.data)} queued workload(s) for BPP processing")
+        
+        for workload in result.data:
+            process_workload(workload)
+            # Small delay between workloads
+            time.sleep(2)
+            
+    except Exception as e:
+        logger.error(f"Error polling workloads: {e}", exc_info=True)
 
 
-async def start_bpp_orchestrator():
-    """Start the BPP orchestrator (called from main.py)"""
-    await orchestrator.start_polling()
+def main():
+    """Main worker loop."""
+    logger.info("Starting BPP Orchestrator...")
+    logger.info(f"BPP_BASE_URL: {BPP_BASE_URL}")
+    logger.info(f"Poll interval: {POLL_INTERVAL} seconds")
+    logger.info(f"Max workloads per cycle: {MAX_WORKLOADS_PER_CYCLE}")
+    
+    if not supabase:
+        logger.error("Supabase client not initialized. Check SUPABASE_URL and SUPABASE_KEY environment variables.")
+        return
+    
+    try:
+        while True:
+            poll_and_process_workloads()
+            time.sleep(POLL_INTERVAL)
+    except KeyboardInterrupt:
+        logger.info("BPP Orchestrator stopped by user")
+    except Exception as e:
+        logger.error(f"Fatal error in BPP Orchestrator: {e}", exc_info=True)
 
 
-def stop_bpp_orchestrator():
-    """Stop the BPP orchestrator"""
-    orchestrator.stop_polling()
+if __name__ == '__main__':
+    main()
