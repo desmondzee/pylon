@@ -1,78 +1,227 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { ChevronRight, Search, Calendar, Download, CheckCircle2, XCircle, Clock, Filter } from 'lucide-react'
+import { createClient } from '@/lib/supabase/client'
 
-const historyData = [
-  {
-    date: '2024-01-24',
-    workloads: 12,
-    completed: 11,
-    failed: 1,
-    totalEnergy: 45.2,
-    totalCost: 87.50,
-    avgCarbon: 95,
-  },
-  {
-    date: '2024-01-23',
-    workloads: 15,
-    completed: 15,
-    failed: 0,
-    totalEnergy: 52.8,
-    totalCost: 98.20,
-    avgCarbon: 82,
-  },
-  {
-    date: '2024-01-22',
-    workloads: 8,
-    completed: 7,
-    failed: 1,
-    totalEnergy: 28.5,
-    totalCost: 54.30,
-    avgCarbon: 156,
-  },
-  {
-    date: '2024-01-21',
-    workloads: 10,
-    completed: 10,
-    failed: 0,
-    totalEnergy: 38.4,
-    totalCost: 72.10,
-    avgCarbon: 88,
-  },
-  {
-    date: '2024-01-20',
-    workloads: 14,
-    completed: 13,
-    failed: 1,
-    totalEnergy: 48.7,
-    totalCost: 91.40,
-    avgCarbon: 102,
-  },
-  {
-    date: '2024-01-19',
-    workloads: 11,
-    completed: 11,
-    failed: 0,
-    totalEnergy: 41.2,
-    totalCost: 78.60,
-    avgCarbon: 78,
-  },
-  {
-    date: '2024-01-18',
-    workloads: 9,
-    completed: 9,
-    failed: 0,
-    totalEnergy: 35.8,
-    totalCost: 67.20,
-    avgCarbon: 85,
-  },
-]
+interface DayData {
+  date: string
+  workloads: number
+  completed: number
+  failed: number
+  totalEnergy: number
+  totalCost: number
+  avgCarbon: number
+}
 
 export default function HistoryPage() {
+  const router = useRouter()
+  const supabase = createClient()
   const [searchQuery, setSearchQuery] = useState('')
   const [dateRange, setDateRange] = useState('7days')
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [historyData, setHistoryData] = useState<DayData[]>([])
+  const [summaryStats, setSummaryStats] = useState({
+    totalWorkloads: 0,
+    totalCompleted: 0,
+    totalEnergy: 0,
+    totalCost: 0,
+    avgCarbon: 0,
+    avgCostPerWorkload: 0
+  })
+
+  useEffect(() => {
+    loadHistoryData()
+  }, [dateRange])
+
+  const loadHistoryData = async () => {
+    setLoading(true)
+    setError(null)
+
+    try {
+      // Get current user
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) {
+        router.push('/signin/user')
+        return
+      }
+
+      // Get user profile
+      const { data: userProfile, error: profileError } = await supabase
+        .from('users')
+        .select('id')
+        .eq('auth_user_id', user.id)
+        .single()
+
+      if (profileError || !userProfile) {
+        setError('Failed to load user profile')
+        setLoading(false)
+        return
+      }
+
+      // Calculate date range
+      const now = new Date()
+      let startDate = new Date()
+
+      switch (dateRange) {
+        case '7days':
+          startDate.setDate(now.getDate() - 7)
+          break
+        case '30days':
+          startDate.setDate(now.getDate() - 30)
+          break
+        case '90days':
+          startDate.setDate(now.getDate() - 90)
+          break
+        case 'all':
+          startDate = new Date(0)
+          break
+      }
+
+      // Fetch workloads
+      const { data: workloads, error: workloadsError } = await supabase
+        .from('compute_workloads')
+        .select('*')
+        .eq('user_id', userProfile.id)
+        .gte('submitted_at', startDate.toISOString())
+        .order('submitted_at', { ascending: false })
+
+      if (workloadsError) {
+        setError('Failed to load workload data')
+        setLoading(false)
+        return
+      }
+
+      // Group workloads by date
+      const workloadsByDate: Record<string, any[]> = {}
+      workloads.forEach(w => {
+        const date = new Date(w.submitted_at).toISOString().split('T')[0]
+        if (!workloadsByDate[date]) {
+          workloadsByDate[date] = []
+        }
+        workloadsByDate[date].push(w)
+      })
+
+      // Calculate daily summaries
+      const dailyData: DayData[] = Object.entries(workloadsByDate)
+        .map(([date, dayWorkloads]) => {
+          const completed = dayWorkloads.filter(w => w.status === 'completed').length
+          const failed = dayWorkloads.filter(w => w.status === 'failed').length
+          const totalEnergy = dayWorkloads.reduce((sum, w) => sum + (w.energy_consumed_kwh || 0), 0)
+          const totalCost = dayWorkloads.reduce((sum, w) => sum + (w.cost_gbp || 0), 0)
+          const totalCarbon = dayWorkloads.reduce((sum, w) => sum + (w.carbon_emitted_kg || 0), 0)
+          const avgCarbon = totalEnergy > 0 ? (totalCarbon * 1000) / totalEnergy : 0
+
+          return {
+            date,
+            workloads: dayWorkloads.length,
+            completed,
+            failed,
+            totalEnergy: Math.round(totalEnergy * 10) / 10,
+            totalCost: Math.round(totalCost * 100) / 100,
+            avgCarbon: Math.round(avgCarbon)
+          }
+        })
+        .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+
+      setHistoryData(dailyData)
+
+      // Calculate summary stats
+      const totalWorkloads = workloads.length
+      const totalCompleted = workloads.filter(w => w.status === 'completed').length
+      const totalEnergy = workloads.reduce((sum, w) => sum + (w.energy_consumed_kwh || 0), 0)
+      const totalCost = workloads.reduce((sum, w) => sum + (w.cost_gbp || 0), 0)
+      const totalCarbon = workloads.reduce((sum, w) => sum + (w.carbon_emitted_kg || 0), 0)
+      const avgCarbon = totalEnergy > 0 ? (totalCarbon * 1000) / totalEnergy : 0
+      const avgCostPerWorkload = totalWorkloads > 0 ? totalCost / totalWorkloads : 0
+
+      setSummaryStats({
+        totalWorkloads,
+        totalCompleted,
+        totalEnergy: Math.round(totalEnergy),
+        totalCost: Math.round(totalCost),
+        avgCarbon: Math.round(avgCarbon),
+        avgCostPerWorkload: Math.round(avgCostPerWorkload * 100) / 100
+      })
+
+      setLoading(false)
+    } catch (err) {
+      console.error('Error loading history:', err)
+      setError('An unexpected error occurred')
+      setLoading(false)
+    }
+  }
+
+  const handleExportCSV = () => {
+    // Create CSV content
+    const csvRows = [
+      ['Pylon Workload History Report'],
+      [`Date Range: ${dateRange}`],
+      [`Generated: ${new Date().toLocaleString()}`],
+      [],
+      ['Date', 'Total Workloads', 'Completed', 'Failed', 'Energy (kWh)', 'Cost (£)', 'Avg Carbon (g CO₂/kWh)'],
+      ...historyData.map(day => [
+        day.date,
+        day.workloads,
+        day.completed,
+        day.failed,
+        day.totalEnergy,
+        day.totalCost.toFixed(2),
+        day.avgCarbon
+      ]),
+      [],
+      ['Summary Statistics'],
+      ['Total Workloads', summaryStats.totalWorkloads],
+      ['Completed Workloads', summaryStats.totalCompleted],
+      ['Total Energy (kWh)', summaryStats.totalEnergy],
+      ['Total Cost (£)', summaryStats.totalCost],
+      ['Avg Carbon (g CO₂/kWh)', summaryStats.avgCarbon],
+      ['Avg Cost per Workload (£)', summaryStats.avgCostPerWorkload.toFixed(2)]
+    ]
+
+    const csvContent = csvRows.map(row => row.join(',')).join('\n')
+
+    // Create download
+    const blob = new Blob([csvContent], { type: 'text/csv' })
+    const url = window.URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `pylon-history-${dateRange}-${new Date().toISOString().split('T')[0]}.csv`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    window.URL.revokeObjectURL(url)
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-center">
+          <div className="w-16 h-16 border-4 border-pylon-accent border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <p className="text-pylon-dark/60">Loading history...</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-center">
+          <p className="text-red-500 mb-4">{error}</p>
+          <button
+            onClick={() => loadHistoryData()}
+            className="px-4 py-2 bg-pylon-dark text-white rounded hover:bg-pylon-dark/90"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-6">
@@ -88,7 +237,10 @@ export default function HistoryPage() {
             <h1 className="text-2xl font-semibold text-pylon-dark">Workload History</h1>
             <p className="text-sm text-pylon-dark/60 mt-1">View past compute workloads and performance</p>
           </div>
-          <button className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-pylon-dark bg-white border border-pylon-dark/10 rounded hover:bg-pylon-light transition-colors">
+          <button
+            onClick={handleExportCSV}
+            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-pylon-dark bg-white border border-pylon-dark/10 rounded hover:bg-pylon-light transition-colors"
+          >
             <Download className="w-4 h-4" />
             Export CSV
           </button>
@@ -138,25 +290,27 @@ export default function HistoryPage() {
       <div className="grid md:grid-cols-4 gap-6">
         <div className="bg-white rounded-lg border border-pylon-dark/5 p-4">
           <p className="text-sm text-pylon-dark/60 mb-2">Total Workloads</p>
-          <p className="text-3xl font-semibold text-pylon-dark">79</p>
+          <p className="text-3xl font-semibold text-pylon-dark">{summaryStats.totalWorkloads}</p>
           <div className="flex items-center gap-1 mt-2 text-xs text-pylon-accent">
             <CheckCircle2 className="w-3.5 h-3.5" />
-            76 completed
+            {summaryStats.totalCompleted} completed
           </div>
         </div>
         <div className="bg-white rounded-lg border border-pylon-dark/5 p-4">
           <p className="text-sm text-pylon-dark/60 mb-2">Total Energy</p>
-          <p className="text-3xl font-semibold text-pylon-dark">290kWh</p>
-          <p className="text-xs text-pylon-dark/60 mt-2">Avg 36.8 kWh/day</p>
+          <p className="text-3xl font-semibold text-pylon-dark">{summaryStats.totalEnergy}kWh</p>
+          <p className="text-xs text-pylon-dark/60 mt-2">
+            Avg {historyData.length > 0 ? (summaryStats.totalEnergy / historyData.length).toFixed(1) : 0} kWh/day
+          </p>
         </div>
         <div className="bg-white rounded-lg border border-pylon-dark/5 p-4">
           <p className="text-sm text-pylon-dark/60 mb-2">Total Cost</p>
-          <p className="text-3xl font-semibold text-pylon-dark">£549</p>
-          <p className="text-xs text-pylon-dark/60 mt-2">Avg £6.95/workload</p>
+          <p className="text-3xl font-semibold text-pylon-dark">£{summaryStats.totalCost}</p>
+          <p className="text-xs text-pylon-dark/60 mt-2">Avg £{summaryStats.avgCostPerWorkload}/workload</p>
         </div>
         <div className="bg-white rounded-lg border border-pylon-dark/5 p-4">
           <p className="text-sm text-pylon-dark/60 mb-2">Avg Carbon</p>
-          <p className="text-3xl font-semibold text-pylon-accent">96g</p>
+          <p className="text-3xl font-semibold text-pylon-accent">{summaryStats.avgCarbon}g</p>
           <p className="text-xs text-pylon-dark/60 mt-2">CO₂ per kWh</p>
         </div>
       </div>
@@ -246,15 +400,12 @@ export default function HistoryPage() {
 
       {/* Month comparison */}
       <div className="bg-white rounded-lg border border-pylon-dark/5 p-6">
-        <h2 className="text-lg font-semibold text-pylon-dark mb-6">Month-over-Month Trends</h2>
+        <h2 className="text-lg font-semibold text-pylon-dark mb-6">Period Summary</h2>
         <div className="grid md:grid-cols-3 gap-6">
           <div>
             <p className="text-sm text-pylon-dark/60 mb-2">Energy Consumption</p>
             <div className="flex items-center gap-2 mb-2">
-              <p className="text-2xl font-semibold text-pylon-dark">290 kWh</p>
-              <span className="text-xs px-2 py-0.5 rounded-full bg-pylon-accent/10 text-pylon-accent font-medium">
-                -12% vs last month
-              </span>
+              <p className="text-2xl font-semibold text-pylon-dark">{summaryStats.totalEnergy} kWh</p>
             </div>
             <div className="h-2 bg-pylon-dark/5 rounded-full overflow-hidden">
               <div className="h-full bg-pylon-accent rounded-full" style={{ width: '88%' }} />
@@ -262,12 +413,9 @@ export default function HistoryPage() {
           </div>
 
           <div>
-            <p className="text-sm text-pylon-dark/60 mb-2">Cost Efficiency</p>
+            <p className="text-sm text-pylon-dark/60 mb-2">Total Cost</p>
             <div className="flex items-center gap-2 mb-2">
-              <p className="text-2xl font-semibold text-pylon-dark">£549</p>
-              <span className="text-xs px-2 py-0.5 rounded-full bg-pylon-accent/10 text-pylon-accent font-medium">
-                -15% vs last month
-              </span>
+              <p className="text-2xl font-semibold text-pylon-dark">£{summaryStats.totalCost}</p>
             </div>
             <div className="h-2 bg-pylon-dark/5 rounded-full overflow-hidden">
               <div className="h-full bg-pylon-accent rounded-full" style={{ width: '85%' }} />
@@ -277,10 +425,7 @@ export default function HistoryPage() {
           <div>
             <p className="text-sm text-pylon-dark/60 mb-2">Carbon Intensity</p>
             <div className="flex items-center gap-2 mb-2">
-              <p className="text-2xl font-semibold text-pylon-dark">96g</p>
-              <span className="text-xs px-2 py-0.5 rounded-full bg-pylon-accent/10 text-pylon-accent font-medium">
-                -18% vs last month
-              </span>
+              <p className="text-2xl font-semibold text-pylon-dark">{summaryStats.avgCarbon}g</p>
             </div>
             <div className="h-2 bg-pylon-dark/5 rounded-full overflow-hidden">
               <div className="h-full bg-pylon-accent rounded-full" style={{ width: '82%' }} />
