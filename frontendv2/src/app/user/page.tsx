@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { ArrowUpRight, ArrowDownRight, Zap, Leaf, Clock, Server, Plus, Upload, BarChart3, TrendingDown, DollarSign } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import StatusBadge from '@/components/common/StatusBadge'
+import EnergyForecastChart from '@/components/EnergyForecastChart'
 
 export default function UserDashboard() {
   const router = useRouter()
@@ -330,6 +331,11 @@ export default function UserDashboard() {
             </div>
           </div>
         </div>
+      </div>
+
+      {/* Energy Usage Forecast */}
+      <div className="bg-white rounded-lg border border-pylon-dark/5 p-6">
+        <EnergyForecastChart userId={undefined} isOperatorView={false} />
       </div>
 
       {/* Quick Actions & Recommendations */}

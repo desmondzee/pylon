@@ -17,10 +17,15 @@ export interface OperatorWorkload extends WorkloadWithRecommendations {
 export async function fetchAllWorkloads(): Promise<OperatorWorkload[]> {
   const supabase = createClient()
 
-  // Fetch all workloads
+  // Fetch workloads from last 30 days only to avoid showing old historical data
+  // (Older workloads are kept in DB for forecasting but hidden from UI)
+  const thirtyDaysAgo = new Date()
+  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
+
   const { data: workloadsData, error: workloadsError } = await supabase
     .from('compute_workloads')
     .select('*')
+    .gte('submitted_at', thirtyDaysAgo.toISOString())
     .order('submitted_at', { ascending: false })
 
   if (workloadsError) {

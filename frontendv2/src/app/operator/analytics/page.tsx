@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { ChevronRight, TrendingUp, TrendingDown, Zap, Leaf, DollarSign, Clock, Download, Users } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import DemoDataControls from '@/components/DemoDataControls'
+import EnergyForecastChart from '@/components/EnergyForecastChart'
 
 type Period = '7 Days' | '30 Days' | '90 Days' | 'All Time'
 
@@ -344,9 +345,14 @@ export default function OperatorAnalyticsPage() {
         </div>
       </div>
 
+      {/* Energy Forecast Dashboard */}
+      <div className="bg-white rounded-lg border border-pylon-dark/5 p-6">
+        <EnergyForecastChart isOperatorView={false} />
+      </div>
+
       {/* Energy consumption over time */}
       <div className="bg-white rounded-lg border border-pylon-dark/5 p-6">
-        <h2 className="text-lg font-semibold text-pylon-dark mb-6">Organization Energy Consumption Over Time</h2>
+        <h2 className="text-lg font-semibold text-pylon-dark mb-6">Historical Energy Consumption</h2>
         {selectedPeriod === 'All Time' ? (
           <div className="h-64 flex items-center justify-center">
             <p className="text-sm text-pylon-dark/60">Chart view not available for All Time period. Use a specific time range for detailed visualization.</p>
