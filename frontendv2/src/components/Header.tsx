@@ -22,13 +22,11 @@ export default function Header() {
         <div className="flex items-center justify-between h-16 lg:h-20">
           {/* Logo */}
           <Link href="/" className="flex-shrink-0">
-            <Image
+            <img
               src="/assets/Inverted.Pylon.Logo.png"
               alt="Pylon Logo"
-              width={180}
-              height={60}
-              priority
-              className="h-12 w-auto object-contain"
+              className="object-contain"
+              style={{ height: '130px', width: 'auto', minHeight: '130px' }}
             />
           </Link>
 

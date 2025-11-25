@@ -34,13 +34,11 @@ export default function Sidebar({ collapsed = false }: SidebarProps) {
       {/* Logo */}
       <div className={clsx('p-4 border-b border-white/10', collapsed ? 'px-3' : 'px-6')}>
         <Link href="/" className="flex items-center justify-center">
-          <Image
+          <img
             src="/assets/pylon.logo.png"
             alt="Pylon Logo"
-            width={40}
-            height={40}
-            priority
-            className="h-10 w-10 object-cover rounded"
+            className="object-contain rounded"
+            style={{ width: '120px', height: '120px', minWidth: '120px', minHeight: '120px' }}
           />
         </Link>
       </div>
