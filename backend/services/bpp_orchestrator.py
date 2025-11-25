@@ -627,13 +627,16 @@ def process_workload(workload: dict) -> bool:
         logger.info(f"[{workload_id}] Summary generated ({len(llm_summary)} chars): {llm_summary[:150]}...")
         
         # Step 7: Update Supabase with summary, final beckn_order_id, and set status to 'running'
+        # Also set actual_start timestamp for completion tracking
+        now = datetime.now(timezone.utc)
         logger.info(f"[{workload_id}] Step 5: Updating Supabase with LLM summary and final beckn_order_id")
         update_result = supabase.table("compute_workloads").update({
             "LLM_select_init_confirm": llm_summary,
             "beckn_order_id": final_beckn_order_id,  # Use the confirmed order ID
             "bpp_processed": True,
             "status": "running",
-            "updated_at": datetime.now(timezone.utc).isoformat()
+            "actual_start": now.isoformat(),  # Set start time for completion tracking
+            "updated_at": now.isoformat()
         }).eq("id", workload_id).execute()
         
         if update_result.data:

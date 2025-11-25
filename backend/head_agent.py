@@ -41,6 +41,15 @@ except Exception as e:
     BPP_UPDATE_STATUS_ENABLED = False
     logger.warning(f"BPP Update/Status Service not available: {e}")
 
+# Import Workload Completion Service
+try:
+    import services.workload_completion_service
+    WORKLOAD_COMPLETION_ENABLED = True
+    logger.info("Workload Completion Service module loaded successfully")
+except Exception as e:
+    WORKLOAD_COMPLETION_ENABLED = False
+    logger.warning(f"Workload Completion Service not available: {e}")
+
 # Initialize Agents
 compute_agent = ComputeAgent()
 energy_agent = EnergyAgent()
@@ -875,12 +884,37 @@ def start_bpp_update_status_service_background():
     logger.info("BPP Update/Status Service background thread started")
 
 
+def start_workload_completion_service_background():
+    """Start the Workload Completion service in a background thread"""
+    if not WORKLOAD_COMPLETION_ENABLED:
+        logger.info("Workload Completion Service disabled")
+        return
+
+    def run_workload_completion_service():
+        """Run the Workload Completion service main loop in a separate thread"""
+        try:
+            logger.info("Starting Workload Completion Service background task...")
+            # Import and run the main function
+            from services.workload_completion_service import main
+            main()
+        except Exception as e:
+            logger.error(f"Workload Completion Service error: {e}", exc_info=True)
+
+    # Start the background thread
+    bg_thread = threading.Thread(target=run_workload_completion_service, daemon=True)
+    bg_thread.start()
+    logger.info("Workload Completion Service background thread started")
+
+
 if __name__ == '__main__':
     # Start BPP Orchestrator before starting Flask
     start_bpp_orchestrator_background()
     
     # Start BPP Update/Status Service before starting Flask
     start_bpp_update_status_service_background()
+    
+    # Start Workload Completion Service before starting Flask
+    start_workload_completion_service_background()
 
     # Start Flask server
     port = int(os.getenv('PORT', 5001))
