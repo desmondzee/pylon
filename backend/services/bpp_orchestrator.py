@@ -520,7 +520,8 @@ def summarize_responses(select_response: dict, init_response: dict, confirm_resp
 
 def process_workload(workload: dict) -> bool:
     """
-    Process a single queued workload through the BPP flow.
+    Process a single scheduled workload through the BPP flow.
+    The workload should already have status='scheduled' and chosen_grid_zone set by the frontend.
     
     Returns True if successful, False otherwise.
     """
@@ -530,22 +531,24 @@ def process_workload(workload: dict) -> bool:
     logger.info(f"Processing workload {workload_id}: {workload_name}")
     
     try:
-        # Step 1: Update status to 'scheduled' to prevent double processing
+        # Step 1: Get the chosen grid zone from the workload (set by frontend when user selects)
+        grid_zone_id = workload.get('chosen_grid_zone')
+        if not grid_zone_id:
+            # Fallback to recommended_1 if chosen_grid_zone not set (shouldn't happen in normal flow)
+            grid_zone_id = workload.get('recommended_grid_zone_id') or workload.get('recommended_1_grid_zone_id')
+            if not grid_zone_id:
+                raise Exception("No chosen_grid_zone found - user must select a recommendation first")
+            logger.warning(f"[{workload_id}] Using fallback grid_zone_id (chosen_grid_zone not set)")
+        
+        grid_zone_item_id = get_grid_zone_item_id(grid_zone_id)
+        logger.info(f"[{workload_id}] Using chosen grid_zone_id: {grid_zone_id} -> item_id: {grid_zone_item_id}")
+        
+        # Step 2: Update bpp_processed flag to prevent double processing (status already 'scheduled' from frontend)
         supabase.table("compute_workloads").update({
-            "status": "scheduled",
-            "bpp_processed": False,
+            "bpp_processed": False,  # Keep False until we complete
             "updated_at": datetime.now(timezone.utc).isoformat()
         }).eq("id", workload_id).execute()
-        logger.info(f"[{workload_id}] Status updated to 'scheduled'")
-        
-        # Step 2: Get the chosen grid zone from the workload
-        grid_zone_id = workload.get('recommended_grid_zone_id') or workload.get('recommended_1_grid_zone_id')
-        if not grid_zone_id:
-            logger.warning(f"[{workload_id}] No grid_zone_id found, using default")
-            grid_zone_item_id = "consumer-resource-office-003"
-        else:
-            grid_zone_item_id = get_grid_zone_item_id(grid_zone_id)
-            logger.info(f"[{workload_id}] Using grid_zone_item_id: {grid_zone_item_id}")
+        logger.info(f"[{workload_id}] Marked for BPP processing")
         
         # Step 3: Call SELECT
         logger.info(f"[{workload_id}] Step 1: Calling SELECT")
@@ -617,26 +620,27 @@ def process_workload(workload: dict) -> bool:
 
 
 def poll_and_process_workloads():
-    """Poll Supabase for queued workloads and process them."""
+    """Poll Supabase for scheduled workloads (user has selected a recommendation) and process them."""
     if not supabase:
         logger.error("Supabase client not initialized")
         return
     
     try:
-        # Query for queued workloads that haven't been processed by BPP
+        # Query for scheduled workloads that haven't been processed by BPP
+        # Status 'scheduled' means user has selected one of the 3 recommendations
         result = supabase.table("compute_workloads")\
             .select("*")\
-            .eq("status", "queued")\
+            .eq("status", "scheduled")\
             .eq("bpp_processed", False)\
             .order("submitted_at", desc=False)\
             .limit(MAX_WORKLOADS_PER_CYCLE)\
             .execute()
         
         if not result.data:
-            logger.debug("No queued workloads found for BPP processing")
+            logger.debug("No scheduled workloads found for BPP processing")
             return
         
-        logger.info(f"Found {len(result.data)} queued workload(s) for BPP processing")
+        logger.info(f"Found {len(result.data)} scheduled workload(s) for BPP processing")
         
         for workload in result.data:
             process_workload(workload)
