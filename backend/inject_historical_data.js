@@ -215,8 +215,11 @@ async function main() {
 
   console.log('\n   ✓ All workloads inserted!\n')
 
-  // 4. Add some recent pending/running workloads
-  console.log('🔄 Step 4: Adding recent active workloads...')
+  // 4. Add some recent pending/running workloads (OPTIONAL - commented out by default)
+  console.log('🔄 Step 4: Skipping recent active workloads (all historical data is completed)...')
+
+  // Uncomment below to add recent RUNNING/PENDING workloads for testing
+  /*
   const recentWorkloads = []
 
   for (let i = 0; i < 8; i++) {
@@ -250,13 +253,15 @@ async function main() {
   } else {
     console.log(`   ✓ Inserted ${recentWorkloads.length} recent active workloads\n`)
   }
+  */
+  console.log('   ✓ No active workloads added - system starts clean\n')
 
   // 5. Summary
   console.log('========================================')
   console.log('✅ Historical Energy Data Injection Complete!')
   console.log('========================================')
   console.log(`Total completed workloads: ${workloads.length}`)
-  console.log(`Recent active workloads: ${recentWorkloads.length}`)
+  console.log(`Recent active workloads: 0 (system starts clean)`)
   console.log(`Date range: ${workloads[workloads.length - 1].submitted_at.split('T')[0]} to ${workloads[0].submitted_at.split('T')[0]}`)
   console.log('')
   console.log(`Total energy consumed: ${totalEnergy.toFixed(2)} kWh`)
