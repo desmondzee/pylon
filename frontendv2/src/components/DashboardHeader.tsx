@@ -4,6 +4,8 @@ import { useEffect, useState } from 'react'
 import { User, Bell, ChevronDown, LogOut } from 'lucide-react'
 import { getUserProfile, signOut } from '@/lib/auth'
 import { useRouter } from 'next/navigation'
+import { createClient } from '@/lib/supabase/client'
+import NotificationsModal from '@/components/user/NotificationsModal'
 
 interface DashboardHeaderProps {
   userName?: string
@@ -12,7 +14,10 @@ interface DashboardHeaderProps {
 export default function DashboardHeader({ userName }: DashboardHeaderProps) {
   const [displayName, setDisplayName] = useState(userName || 'User')
   const [showMenu, setShowMenu] = useState(false)
+  const [showNotifications, setShowNotifications] = useState(false)
+  const [unreadCount, setUnreadCount] = useState(0)
   const router = useRouter()
+  const supabase = createClient()
 
   useEffect(() => {
     const loadUser = async () => {
@@ -26,6 +31,40 @@ export default function DashboardHeader({ userName }: DashboardHeaderProps) {
     }
   }, [userName])
 
+  useEffect(() => {
+    const loadUnreadCount = async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser()
+        if (!user) return
+
+        const { data: userProfile } = await supabase
+          .from('users')
+          .select('id')
+          .eq('user_email', user.email)
+          .single()
+
+        if (!userProfile) return
+
+        const { count, error } = await supabase
+          .from('notifications')
+          .select('*', { count: 'exact', head: true })
+          .eq('user_id', userProfile.id)
+          .eq('read', false)
+
+        if (!error && count !== null) {
+          setUnreadCount(count)
+        }
+      } catch (err) {
+        console.error('Error loading unread count:', err)
+      }
+    }
+
+    loadUnreadCount()
+    // Poll for new notifications every 10 seconds
+    const interval = setInterval(loadUnreadCount, 10000)
+    return () => clearInterval(interval)
+  }, [supabase])
+
   const handleSignOut = async () => {
     await signOut()
     router.push('/signin')
@@ -38,12 +77,53 @@ export default function DashboardHeader({ userName }: DashboardHeaderProps) {
       <div className="flex items-center gap-4">
         {/* Notifications */}
         <button 
+          onClick={() => setShowNotifications(!showNotifications)}
           className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors relative"
           title="Notifications"
         >
           <Bell className="w-5 h-5" />
-          <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-[#121728] rounded-full" />
+          {unreadCount > 0 && (
+            <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-pylon-accent rounded-full" />
+          )}
         </button>
+        
+        {/* Notifications Modal */}
+        {showNotifications && (
+          <NotificationsModal
+            isOpen={showNotifications}
+            onClose={() => {
+              setShowNotifications(false)
+              // Reload unread count when closing
+              const loadUnreadCount = async () => {
+                try {
+                  const { data: { user } } = await supabase.auth.getUser()
+                  if (!user) return
+
+                  const { data: userProfile } = await supabase
+                    .from('users')
+                    .select('id')
+                    .eq('user_email', user.email)
+                    .single()
+
+                  if (!userProfile) return
+
+                  const { count } = await supabase
+                    .from('notifications')
+                    .select('*', { count: 'exact', head: true })
+                    .eq('user_id', userProfile.id)
+                    .eq('read', false)
+
+                  if (count !== null) {
+                    setUnreadCount(count)
+                  }
+                } catch (err) {
+                  console.error('Error loading unread count:', err)
+                }
+              }
+              loadUnreadCount()
+            }}
+          />
+        )}
 
         {/* User menu */}
         <div className="relative">

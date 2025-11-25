@@ -831,28 +831,55 @@ def poll_and_process_workloads():
         logger.error("Supabase client not initialized")
         return
     
-    try:
-        # Query for pending workloads (limit to prevent overload)
-        result = supabase.table("compute_workloads")\
-            .select("*")\
-            .eq("status", "pending")\
-            .order("submitted_at", desc=False)\
-            .limit(MAX_WORKLOADS_PER_CYCLE)\
-            .execute()
-        
-        if not result.data:
-            logger.debug("No pending workloads found")
-            return
-        
-        logger.info(f"Found {len(result.data)} pending workload(s)")
-        
-        for workload in result.data:
-            process_workload(workload)
-            # Small delay between workloads to avoid overwhelming the system
-            time.sleep(2)
+    # Retry logic for network errors
+    max_retries = 3
+    retry_delay = 5  # seconds
+    
+    for attempt in range(max_retries):
+        try:
+            # Query for pending workloads (limit to prevent overload)
+            result = supabase.table("compute_workloads")\
+                .select("*")\
+                .eq("status", "pending")\
+                .order("submitted_at", desc=False)\
+                .limit(MAX_WORKLOADS_PER_CYCLE)\
+                .execute()
             
-    except Exception as e:
-        logger.error(f"Error polling workloads: {e}", exc_info=True)
+            if not result.data:
+                logger.debug("No pending workloads found")
+                return
+            
+            logger.info(f"Found {len(result.data)} pending workload(s)")
+            
+            for workload in result.data:
+                process_workload(workload)
+                # Small delay between workloads to avoid overwhelming the system
+                time.sleep(2)
+            
+            # Success - break out of retry loop
+            return
+            
+        except Exception as e:
+            error_str = str(e).lower()
+            is_network_error = any(keyword in error_str for keyword in [
+                'nodename nor servname',
+                'connection',
+                'timeout',
+                'network',
+                'dns',
+                'connect'
+            ])
+            
+            if is_network_error and attempt < max_retries - 1:
+                wait_time = retry_delay * (2 ** attempt)  # Exponential backoff
+                logger.warning(f"Network error polling workloads (attempt {attempt + 1}/{max_retries}): {e}")
+                logger.info(f"Retrying in {wait_time} seconds...")
+                time.sleep(wait_time)
+                continue
+            else:
+                # Non-network error or final attempt failed
+                logger.error(f"Error polling workloads: {e}", exc_info=True)
+                return
 
 
 def main():

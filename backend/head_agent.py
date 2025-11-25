@@ -766,6 +766,360 @@ def index():
     </html>
     """
 
+def create_notification(user_id: str, workload_id: str, notification_type: str, title: str, message: str, action_taken: str, operator_id: str = None, operator_name: str = None, metadata: dict = None):
+    """
+    Helper function to create a notification for a user when an operator takes an action.
+    """
+    if not supabase:
+        logger.error("Supabase not initialized, cannot create notification")
+        return None
+    
+    try:
+        notification_data = {
+            "user_id": user_id,
+            "workload_id": workload_id,
+            "notification_type": notification_type,
+            "title": title,
+            "message": message,
+            "action_taken": action_taken,
+            "read": False,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat()
+        }
+        
+        if operator_id:
+            notification_data["operator_id"] = operator_id
+        if operator_name:
+            notification_data["operator_name"] = operator_name
+        if metadata:
+            notification_data["metadata"] = metadata
+        
+        result = supabase.table("notifications").insert(notification_data).execute()
+        if result.data:
+            logger.info(f"Created notification for user {user_id} about workload {workload_id}: {notification_type}")
+            return result.data[0]
+        else:
+            logger.warning(f"Notification insert returned no data")
+            return None
+    except Exception as e:
+        logger.error(f"Error creating notification: {e}", exc_info=True)
+        return None
+
+
+@app.route('/api/workloads/<workload_id>/pause', methods=['POST'])
+def pause_workload(workload_id):
+    """
+    Pause a running workload. Called by operator frontend.
+    """
+    try:
+        # Get operator info from request (should be authenticated)
+        data = request.json or {}
+        operator_id = data.get('operator_id')
+        operator_name = data.get('operator_name', 'Operator')
+        
+        if not supabase:
+            return jsonify({"error": "Database not initialized"}), 500
+        
+        # Get the workload
+        try:
+            workload_result = supabase.table("compute_workloads").select("*").eq("id", workload_id).single().execute()
+        except Exception as db_error:
+            logger.error(f"Database error fetching workload {workload_id}: {db_error}")
+            return jsonify({"error": f"Database error: {str(db_error)}"}), 500
+        
+        if not workload_result.data:
+            logger.warning(f"Workload {workload_id} not found")
+            return jsonify({"error": "Workload not found"}), 404
+        
+        workload = workload_result.data
+        current_status_lower = (workload.get('status') or '').lower()
+        
+        # Only allow pausing running workloads (case-insensitive check)
+        if current_status_lower != 'running':
+            logger.warning(f"Cannot pause workload {workload_id} with status: {workload.get('status')}")
+            return jsonify({"error": f"Cannot pause workload with status: {workload.get('status')}"}), 400
+        
+        # Update workload status to paused (lowercase to match database convention)
+        try:
+            update_result = supabase.table("compute_workloads").update({
+                "status": "paused",
+                "updated_at": datetime.now(timezone.utc).isoformat()
+            }).eq("id", workload_id).execute()
+            
+            if not update_result.data:
+                logger.error(f"Update returned no data for workload {workload_id}")
+                return jsonify({"error": "Failed to update workload in database"}), 500
+        except Exception as update_error:
+            logger.error(f"Database error updating workload {workload_id}: {update_error}", exc_info=True)
+            return jsonify({"error": f"Database update error: {str(update_error)}"}), 500
+        
+        # Create notification for the user
+        user_id = workload.get('user_id')
+        if user_id:
+            create_notification(
+                user_id=user_id,
+                workload_id=workload_id,
+                notification_type="workload_paused",
+                title="Workload Paused",
+                message=f"Your workload '{workload.get('workload_name', 'Unnamed')}' has been paused by an operator.",
+                action_taken="paused",
+                operator_id=operator_id,
+                operator_name=operator_name,
+                metadata={
+                    "workload_name": workload.get('workload_name'),
+                    "job_id": workload.get('job_id'),
+                    "previous_status": workload.get('status'),
+                    "new_status": "paused"
+                }
+            )
+        
+        logger.info(f"Workload {workload_id} paused by operator {operator_id}")
+        return jsonify({
+            "success": True,
+            "message": "Workload paused successfully",
+            "workload_id": workload_id,
+            "new_status": "paused"
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Error pausing workload: {e}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/workloads/<workload_id>/resume', methods=['POST'])
+def resume_workload(workload_id):
+    """
+    Resume a paused workload. Called by operator frontend.
+    """
+    try:
+        # Get operator info from request
+        data = request.json or {}
+        operator_id = data.get('operator_id')
+        operator_name = data.get('operator_name', 'Operator')
+        
+        if not supabase:
+            return jsonify({"error": "Database not initialized"}), 500
+        
+        # Get the workload
+        try:
+            workload_result = supabase.table("compute_workloads").select("*").eq("id", workload_id).single().execute()
+        except Exception as db_error:
+            logger.error(f"Database error fetching workload {workload_id}: {db_error}")
+            return jsonify({"error": f"Database error: {str(db_error)}"}), 500
+        
+        if not workload_result.data:
+            logger.warning(f"Workload {workload_id} not found")
+            return jsonify({"error": "Workload not found"}), 404
+        
+        workload = workload_result.data
+        current_status_lower = (workload.get('status') or '').lower()
+        
+        # Only allow resuming paused workloads (case-insensitive check)
+        if current_status_lower != 'paused':
+            logger.warning(f"Cannot resume workload {workload_id} with status: {workload.get('status')}")
+            return jsonify({"error": f"Cannot resume workload with status: {workload.get('status')}"}), 400
+        
+        # Update workload status back to running
+        try:
+            update_result = supabase.table("compute_workloads").update({
+                "status": "running",
+                "updated_at": datetime.now(timezone.utc).isoformat()
+            }).eq("id", workload_id).execute()
+            
+            if not update_result.data:
+                logger.error(f"Update returned no data for workload {workload_id}")
+                return jsonify({"error": "Failed to update workload in database"}), 500
+        except Exception as update_error:
+            logger.error(f"Database error updating workload {workload_id}: {update_error}", exc_info=True)
+            return jsonify({"error": f"Database update error: {str(update_error)}"}), 500
+        
+        # Create notification for the user
+        user_id = workload.get('user_id')
+        if user_id:
+            create_notification(
+                user_id=user_id,
+                workload_id=workload_id,
+                notification_type="workload_resumed",
+                title="Workload Resumed",
+                message=f"Your workload '{workload.get('workload_name', 'Unnamed')}' has been resumed by an operator.",
+                action_taken="resumed",
+                operator_id=operator_id,
+                operator_name=operator_name,
+                metadata={
+                    "workload_name": workload.get('workload_name'),
+                    "job_id": workload.get('job_id'),
+                    "previous_status": workload.get('status'),
+                    "new_status": "running"
+                }
+            )
+        
+        logger.info(f"Workload {workload_id} resumed by operator {operator_id}")
+        return jsonify({
+            "success": True,
+            "message": "Workload resumed successfully",
+            "workload_id": workload_id,
+            "new_status": "running"
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Error resuming workload: {e}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/workloads/<workload_id>/cancel', methods=['POST'])
+def cancel_workload(workload_id):
+    """
+    Cancel a workload. Called by operator frontend.
+    """
+    try:
+        # Get operator info from request
+        data = request.json or {}
+        operator_id = data.get('operator_id')
+        operator_name = data.get('operator_name', 'Operator')
+        
+        if not supabase:
+            return jsonify({"error": "Database not initialized"}), 500
+        
+        # Get the workload
+        try:
+            workload_result = supabase.table("compute_workloads").select("*").eq("id", workload_id).single().execute()
+        except Exception as db_error:
+            logger.error(f"Database error fetching workload {workload_id}: {db_error}")
+            return jsonify({"error": f"Database error: {str(db_error)}"}), 500
+        
+        if not workload_result.data:
+            logger.warning(f"Workload {workload_id} not found")
+            return jsonify({"error": "Workload not found"}), 404
+        
+        workload = workload_result.data
+        current_status_lower = (workload.get('status') or '').lower()
+        
+        # Don't allow cancelling already completed or cancelled workloads (case-insensitive check)
+        if current_status_lower in ['completed', 'cancelled']:
+            logger.warning(f"Cannot cancel workload {workload_id} with status: {workload.get('status')}")
+            return jsonify({"error": f"Cannot cancel workload with status: {workload.get('status')}"}), 400
+        
+        # Update workload status to cancelled (lowercase to match database convention)
+        try:
+            update_result = supabase.table("compute_workloads").update({
+                "status": "cancelled",
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+                "actual_end": datetime.now(timezone.utc).isoformat()  # Set end time
+            }).eq("id", workload_id).execute()
+            
+            if not update_result.data:
+                logger.error(f"Update returned no data for workload {workload_id}")
+                return jsonify({"error": "Failed to update workload in database"}), 500
+        except Exception as update_error:
+            logger.error(f"Database error updating workload {workload_id}: {update_error}", exc_info=True)
+            return jsonify({"error": f"Database update error: {str(update_error)}"}), 500
+        
+        # Create notification for the user
+        user_id = workload.get('user_id')
+        if user_id:
+            create_notification(
+                user_id=user_id,
+                workload_id=workload_id,
+                notification_type="workload_cancelled",
+                title="Workload Cancelled",
+                message=f"Your workload '{workload.get('workload_name', 'Unnamed')}' has been cancelled by an operator.",
+                action_taken="cancelled",
+                operator_id=operator_id,
+                operator_name=operator_name,
+                metadata={
+                    "workload_name": workload.get('workload_name'),
+                    "job_id": workload.get('job_id'),
+                    "previous_status": workload.get('status'),
+                    "new_status": "cancelled"
+                }
+            )
+        
+        logger.info(f"Workload {workload_id} cancelled by operator {operator_id}")
+        return jsonify({
+            "success": True,
+            "message": "Workload cancelled successfully",
+            "workload_id": workload_id,
+            "new_status": "cancelled"
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Error cancelling workload: {e}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/workloads/bulk-delete', methods=['POST'])
+def bulk_delete_workloads():
+    """
+    Delete multiple workloads and create notifications for affected users.
+    Called by operator frontend.
+    """
+    try:
+        # Get operator info from request
+        data = request.json or {}
+        workload_ids = data.get('workload_ids', [])
+        operator_id = data.get('operator_id')
+        operator_name = data.get('operator_name', 'Operator')
+        
+        if not workload_ids:
+            return jsonify({"error": "No workloads specified"}), 400
+        
+        if not supabase:
+            return jsonify({"error": "Database not initialized"}), 500
+        
+        # Get all workloads before deleting (for notifications)
+        try:
+            workloads_result = supabase.table("compute_workloads")\
+                .select("*")\
+                .in_("id", workload_ids)\
+                .execute()
+            
+            if not workloads_result.data:
+                return jsonify({"error": "No workloads found"}), 404
+            
+            workloads_to_delete = workloads_result.data
+            
+            # Create notifications for each workload's user before deleting
+            for workload in workloads_to_delete:
+                user_id = workload.get('user_id')
+                if user_id:
+                    create_notification(
+                        user_id=user_id,
+                        workload_id=workload.get('id'),
+                        notification_type="workload_deleted",
+                        title="Workload Deleted",
+                        message=f"Your workload '{workload.get('workload_name', 'Unnamed')}' has been deleted by an operator.",
+                        action_taken="deleted",
+                        operator_id=operator_id,
+                        operator_name=operator_name,
+                        metadata={
+                            "workload_name": workload.get('workload_name'),
+                            "job_id": workload.get('job_id'),
+                            "previous_status": workload.get('status')
+                        }
+                    )
+            
+            # Delete the workloads
+            delete_result = supabase.table("compute_workloads")\
+                .delete()\
+                .in_("id", workload_ids)\
+                .execute()
+            
+            logger.info(f"Deleted {len(workload_ids)} workloads by operator {operator_id}")
+            return jsonify({
+                "success": True,
+                "message": f"Successfully deleted {len(workload_ids)} workload(s)",
+                "deleted_count": len(workload_ids)
+            }), 200
+            
+        except Exception as db_error:
+            logger.error(f"Database error during bulk delete: {db_error}", exc_info=True)
+            return jsonify({"error": f"Database error: {str(db_error)}"}), 500
+        
+    except Exception as e:
+        logger.error(f"Error in bulk delete: {e}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route('/get_recommendations/<workload_id>', methods=['GET'])
 def get_recommendations(workload_id):
     """

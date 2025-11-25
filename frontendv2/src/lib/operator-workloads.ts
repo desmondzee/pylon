@@ -72,7 +72,8 @@ export async function fetchAllWorkloads(): Promise<OperatorWorkload[]> {
     created_at: w.submitted_at || w.created_at,
     started_at: w.actual_start,
     completed_at: w.actual_end,
-    progress: w.status === 'completed' ? 100 : w.status === 'running' ? 50 : 0,
+    progress: w.status === 'completed' ? 100 : w.status === 'running' ? 50 : 0, // Will be calculated dynamically
+    runtime_hours: w.runtime_hours || w.estimated_duration_hours || null,
     // Recommendation fields
     recommended_grid_zone_id: w.recommended_grid_zone_id || null,
     recommended_2_grid_zone_id: w.recommended_2_grid_zone_id || null,

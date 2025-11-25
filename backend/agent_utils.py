@@ -45,71 +45,99 @@ def get_gemini_response(prompt: str, model_name: str = "gemini-2.0-flash-exp") -
         logger.error(f"Error calling Gemini API: {e}")
         return f"Error: {str(e)}"
 
-def get_gemini_json_response(prompt: str, model_name: str = "gemini-2.0-flash-exp") -> dict:
+def get_gemini_json_response(prompt: str, model_name: str = "gemini-2.0-flash-exp", max_retries: int = 3) -> dict:
     """
-    Get a JSON response from Gemini model.
+    Get a JSON response from Gemini model with retry logic for rate limits and quota errors.
     Returns a dict, handling cases where response might be a list or other structure.
     """
-    try:
-        model = genai.GenerativeModel(model_name)
-        
-        # Add JSON instruction to prompt to ensure JSON response
-        json_prompt = prompt
-        if "Return a VALID JSON" not in prompt and "return JSON" not in prompt.lower():
-            json_prompt = prompt + "\n\nIMPORTANT: Return ONLY valid JSON, no markdown formatting, no code blocks, no explanations. Just the raw JSON object."
-        
-        # Generate content
-        response = model.generate_content(json_prompt)
-        response_text = response.text.strip()
-        
-        # Remove markdown code blocks if present (```json or ```)
-        if response_text.startswith("```"):
-            lines = response_text.split("\n")
-            # Remove first line if it's ```json or ```
-            if lines[0].strip().startswith("```"):
-                lines = lines[1:]
-            # Remove last line if it's ```
-            if lines and lines[-1].strip() == "```":
-                lines = lines[:-1]
-            response_text = "\n".join(lines).strip()
-        
-        # Parse JSON
-        parsed = json.loads(response_text)
-        
-        # Handle case where Gemini returns a list instead of dict
-        if isinstance(parsed, list):
-            if len(parsed) > 0 and isinstance(parsed[0], dict):
-                logger.warning("Gemini returned a list, using first element")
-                return parsed[0]
-            else:
-                logger.warning("Gemini returned an empty or invalid list, wrapping in dict")
-                return {"response": parsed, "error": "Unexpected list format"}
-        
-        # Ensure we return a dict
-        if not isinstance(parsed, dict):
-            logger.warning(f"Gemini returned non-dict type: {type(parsed)}, wrapping")
-            return {"response": parsed, "error": "Unexpected response format"}
-        
-        return parsed
-    except json.JSONDecodeError as e:
-        logger.error(f"JSON decode error: {e}")
-        # Try to extract JSON from text if it's wrapped
+    import time
+    
+    for attempt in range(max_retries):
         try:
-            if 'response' in locals():
-                text = response.text
-                # Try to find JSON object in text
-                start = text.find('{')
-                end = text.rfind('}') + 1
-                if start >= 0 and end > start:
-                    parsed = json.loads(text[start:end])
-                    logger.info("Successfully extracted JSON from wrapped response")
-                    return parsed
-        except Exception as extract_error:
-            logger.error(f"Failed to extract JSON: {extract_error}")
-        return {"error": f"JSON decode error: {str(e)}"}
-    except Exception as e:
-        logger.error(f"Error calling Gemini API for JSON: {e}")
-        return {"error": str(e)}
+            model = genai.GenerativeModel(model_name)
+            
+            # Add JSON instruction to prompt to ensure JSON response
+            json_prompt = prompt
+            if "Return a VALID JSON" not in prompt and "return JSON" not in prompt.lower():
+                json_prompt = prompt + "\n\nIMPORTANT: Return ONLY valid JSON, no markdown formatting, no code blocks, no explanations. Just the raw JSON object."
+            
+            # Generate content
+            response = model.generate_content(json_prompt)
+            response_text = response.text.strip()
+            
+            # Remove markdown code blocks if present (```json or ```)
+            if response_text.startswith("```"):
+                lines = response_text.split("\n")
+                # Remove first line if it's ```json or ```
+                if lines[0].strip().startswith("```"):
+                    lines = lines[1:]
+                # Remove last line if it's ```
+                if lines and lines[-1].strip() == "```":
+                    lines = lines[:-1]
+                response_text = "\n".join(lines).strip()
+            
+            # Parse JSON
+            parsed = json.loads(response_text)
+            
+            # Handle case where Gemini returns a list instead of dict
+            if isinstance(parsed, list):
+                if len(parsed) > 0 and isinstance(parsed[0], dict):
+                    logger.warning("Gemini returned a list, using first element")
+                    return parsed[0]
+                else:
+                    logger.warning("Gemini returned an empty or invalid list, wrapping in dict")
+                    return {"response": parsed, "error": "Unexpected list format"}
+            
+            # Ensure we return a dict
+            if not isinstance(parsed, dict):
+                logger.warning(f"Gemini returned non-dict type: {type(parsed)}, wrapping")
+                return {"response": parsed, "error": "Unexpected response format"}
+            
+            return parsed
+            
+        except Exception as e:
+            error_str = str(e)
+            is_rate_limit = "429" in error_str or "quota" in error_str.lower() or "rate limit" in error_str.lower()
+            
+            # Check if error message contains retry delay information
+            retry_delay = None
+            if "retry_delay" in error_str or "seconds" in error_str:
+                # Try to extract retry delay from error message
+                import re
+                delay_match = re.search(r'seconds[:\s]+(\d+)', error_str)
+                if delay_match:
+                    retry_delay = int(delay_match.group(1))
+            
+            if is_rate_limit and attempt < max_retries - 1:
+                # Use extracted delay or exponential backoff
+                wait_time = retry_delay if retry_delay else (30 * (2 ** attempt))  # 30s, 60s, 120s
+                logger.warning(f"Gemini API rate limit/quota error (attempt {attempt + 1}/{max_retries}): {error_str[:200]}")
+                logger.info(f"Waiting {wait_time} seconds before retry...")
+                time.sleep(wait_time)
+                continue
+            elif isinstance(e, json.JSONDecodeError):
+                logger.error(f"JSON decode error: {e}")
+                # Try to extract JSON from text if it's wrapped
+                try:
+                    if 'response' in locals():
+                        text = response.text
+                        # Try to find JSON object in text
+                        start = text.find('{')
+                        end = text.rfind('}') + 1
+                        if start >= 0 and end > start:
+                            parsed = json.loads(text[start:end])
+                            logger.info("Successfully extracted JSON from wrapped response")
+                            return parsed
+                except Exception as extract_error:
+                    logger.error(f"Failed to extract JSON: {extract_error}")
+                return {"error": f"JSON decode error: {str(e)}"}
+            else:
+                # Non-rate-limit error or final attempt
+                logger.error(f"Error calling Gemini API for JSON: {e}")
+                return {"error": str(e)}
+    
+    # All retries exhausted
+    return {"error": "Max retries exceeded for Gemini API call"}
 
 def log_agent_action(agent_name: str, action: str, details: dict):
     """

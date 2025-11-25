@@ -243,7 +243,9 @@ export default function WorkloadsPage() {
         created_at: w.submitted_at || w.created_at,
         started_at: w.actual_start,
         completed_at: w.actual_end,
-        progress: w.status === 'completed' ? 100 : w.status === 'running' ? 50 : 0,
+        // Progress will be calculated dynamically based on elapsed time
+        progress: 0, // Will be calculated in component
+        runtime_hours: w.runtime_hours || w.estimated_duration_hours || null,
         // Recommendation fields
         recommended_grid_zone_id: w.recommended_grid_zone_id || null,
         recommended_2_grid_zone_id: w.recommended_2_grid_zone_id || null,
@@ -586,20 +588,59 @@ export default function WorkloadsPage() {
             </div>
 
             {/* Progress bar for running workloads */}
-            {(workload.status === 'RUNNING' || workload.status === 'running') && (
-              <div className="mb-5">
-                <div className="flex items-center justify-between text-xs mb-1.5">
-                  <span className="text-pylon-dark/60">Progress</span>
-                  <span className="font-medium text-pylon-dark">{workload.progress}%</span>
+            {(workload.status === 'RUNNING' || workload.status === 'running') && (() => {
+              // Calculate progress based on elapsed time / total runtime
+              let calculatedProgress = 0
+              try {
+                const startTimeStr = workload.started_at || workload.actual_start
+                const runtimeHours = workload.runtime_hours || workload.estimated_duration_hours
+                
+                if (startTimeStr && runtimeHours) {
+                  const startTime = new Date(startTimeStr).getTime()
+                  const now = Date.now()
+                  
+                  // Validate start time is not in the future and is a valid date
+                  if (isNaN(startTime) || startTime > now) {
+                    console.warn('Invalid start time for progress calculation:', startTimeStr)
+                    calculatedProgress = 0
+                  } else {
+                    const elapsedHours = (now - startTime) / (1000 * 60 * 60) // Convert ms to hours
+                    const totalHours = Number(runtimeHours)
+                    
+                    // Validate total hours is positive and reasonable (not more than 1 year)
+                    if (totalHours > 0 && totalHours < 8760 && elapsedHours >= 0) {
+                      calculatedProgress = Math.min(100, Math.max(0, (elapsedHours / totalHours) * 100))
+                    } else {
+                      console.warn('Invalid runtime hours for progress calculation:', totalHours)
+                      calculatedProgress = 0
+                    }
+                  }
+                } else if (workload.status?.toLowerCase() === 'completed') {
+                  calculatedProgress = 100
+                } else {
+                  // Fallback: if no start time or runtime, show 0% but don't error
+                  calculatedProgress = 0
+                }
+              } catch (err) {
+                console.error('Error calculating progress:', err, workload)
+                calculatedProgress = 0
+              }
+              
+              return (
+                <div className="mb-5">
+                  <div className="flex items-center justify-between text-xs mb-1.5">
+                    <span className="text-pylon-dark/60">Progress</span>
+                    <span className="font-medium text-pylon-dark">{Math.round(calculatedProgress)}%</span>
+                  </div>
+                  <div className="h-2 bg-pylon-dark/5 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-pylon-accent rounded-full transition-all"
+                      style={{ width: `${Math.min(100, Math.max(0, calculatedProgress))}%` }}
+                    />
+                  </div>
                 </div>
-                <div className="h-2 bg-pylon-dark/5 rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-pylon-accent rounded-full transition-all"
-                    style={{ width: `${workload.progress}%` }}
-                  />
-                </div>
-              </div>
-            )}
+              )
+            })()}
 
             {/* LLM Summary Preview */}
             {workload.LLM_select_init_confirm && (() => {

@@ -8,6 +8,7 @@ import { createClient } from '@/lib/supabase/client'
 import { fetchAllWorkloads, OperatorWorkload } from '@/lib/operator-workloads'
 import { fetchGridZones, formatGridZoneLabel } from '@/lib/grid-zones'
 import { GridZoneMap } from '@/lib/workload-types'
+import { getUserProfile } from '@/lib/auth'
 
 const workloadTypeLabels: Record<string, string> = {
   'TRAINING_RUN': 'Training',
@@ -28,6 +29,10 @@ export default function OperatorWorkloadsPage() {
   const [userFilter, setUserFilter] = useState('all')
   const [gridZoneMap, setGridZoneMap] = useState<GridZoneMap>({})
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null)
+  const [actionLoading, setActionLoading] = useState<string | null>(null) // workload_id being acted upon
+  const [selectedWorkloads, setSelectedWorkloads] = useState<Set<string>>(new Set())
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [deleting, setDeleting] = useState(false)
 
   // Load all workloads from Supabase
   const loadWorkloads = async () => {
@@ -117,7 +122,174 @@ export default function OperatorWorkloadsPage() {
     return true
   })
 
-  const uniqueUsers = Array.from(new Set(workloads.map(w => w.user_email).filter(Boolean)))
+  const uniqueUsers = Array.from(new Set(workloads.map(w => w.user_email).filter((email): email is string => Boolean(email))))
+
+  const handlePause = async (workloadId: string) => {
+    if (actionLoading) return
+    
+    setActionLoading(workloadId)
+    try {
+      const profile = await getUserProfile()
+      if (!profile) {
+        alert('Unable to get operator information')
+        return
+      }
+      
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5001'}/api/workloads/${workloadId}/pause`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          operator_id: profile.operatorId || profile.id,
+          operator_name: profile.name || profile.email || 'Operator'
+        })
+      })
+      
+      const data = await response.json()
+      
+      if (response.ok && data.success) {
+        // Reload workloads to show updated status
+        await loadWorkloads()
+      } else {
+        alert(data.error || 'Failed to pause workload')
+      }
+    } catch (error) {
+      console.error('Error pausing workload:', error)
+      alert('Failed to pause workload. Please try again.')
+    } finally {
+      setActionLoading(null)
+    }
+  }
+
+  const handleResume = async (workloadId: string) => {
+    if (actionLoading) return
+    
+    setActionLoading(workloadId)
+    try {
+      const profile = await getUserProfile()
+      if (!profile) {
+        alert('Unable to get operator information')
+        return
+      }
+      
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5001'}/api/workloads/${workloadId}/resume`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          operator_id: profile.operatorId || profile.id,
+          operator_name: profile.name || profile.email || 'Operator'
+        })
+      })
+      
+      const data = await response.json()
+      
+      if (response.ok && data.success) {
+        // Reload workloads to show updated status
+        await loadWorkloads()
+      } else {
+        alert(data.error || 'Failed to resume workload')
+      }
+    } catch (error) {
+      console.error('Error resuming workload:', error)
+      alert('Failed to resume workload. Please try again.')
+    } finally {
+      setActionLoading(null)
+    }
+  }
+
+  const handleSelectAll = () => {
+    if (selectedWorkloads.size === filteredWorkloads.length) {
+      setSelectedWorkloads(new Set())
+    } else {
+      setSelectedWorkloads(new Set(filteredWorkloads.map(w => w.id)))
+    }
+  }
+
+  const handleSelectWorkload = (id: string) => {
+    const newSelected = new Set(selectedWorkloads)
+    if (newSelected.has(id)) {
+      newSelected.delete(id)
+    } else {
+      newSelected.add(id)
+    }
+    setSelectedWorkloads(newSelected)
+  }
+
+  const handleDeleteSelected = async () => {
+    if (selectedWorkloads.size === 0) return
+
+    setDeleting(true)
+    try {
+      const profile = await getUserProfile()
+      if (!profile) {
+        alert('Unable to get operator information')
+        setDeleting(false)
+        return
+      }
+
+      // Get workload details before deleting for notifications
+      const workloadsToDelete = workloads.filter(w => selectedWorkloads.has(w.id))
+      
+      // Create notifications for each affected user before deleting
+      for (const workload of workloadsToDelete) {
+        if (workload.user_id) {
+          try {
+            await supabase
+              .from('notifications')
+              .insert({
+                user_id: workload.user_id,
+                workload_id: workload.id,
+                notification_type: 'workload_deleted',
+                title: 'Workload Deleted',
+                message: `Your workload '${workload.workload_name || 'Unnamed'}' has been deleted by an operator.`,
+                action_taken: 'deleted',
+                operator_id: profile.operatorId || profile.id,
+                operator_name: profile.name || profile.email || 'Operator',
+                read: false,
+                metadata: {
+                  workload_name: workload.workload_name,
+                  job_id: workload.job_id,
+                  previous_status: workload.status
+                }
+              })
+          } catch (notifErr) {
+            console.error('Error creating notification:', notifErr)
+            // Continue with deletion even if notification fails
+          }
+        }
+      }
+
+      // Delete directly from Supabase (same as user frontend)
+      const { error } = await supabase
+        .from('compute_workloads')
+        .delete()
+        .in('id', Array.from(selectedWorkloads))
+
+      if (error) throw error
+
+      // Remove deleted workloads from state
+      setWorkloads(workloads.filter(w => !selectedWorkloads.has(w.id)))
+      setSelectedWorkloads(new Set())
+      setShowDeleteConfirm(false)
+    } catch (err) {
+      console.error('Delete error:', err)
+      alert('Failed to delete workloads. Please try again.')
+    }
+    setDeleting(false)
+  }
+
+  const handleCancel = (workloadId: string) => {
+    // Select the task and scroll to top where delete button is
+    const newSelected = new Set(selectedWorkloads)
+    newSelected.add(workloadId)
+    setSelectedWorkloads(newSelected)
+    
+    // Scroll to top smoothly
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
 
   const handleExport = () => {
     const csvHeaders = ['ID', 'Job ID', 'Workload Name', 'User', 'Type', 'Status', 'Urgency', 'Location', 'Energy (kWh)', 'Carbon (g CO₂)', 'Cost (£)', 'Created At']
@@ -200,7 +372,7 @@ export default function OperatorWorkloadsPage() {
 
               {/* User filter */}
               <select
-                value={userFilter}
+                value={userFilter || 'all'}
                 onChange={(e) => setUserFilter(e.target.value)}
                 className="px-4 py-2 text-sm border border-pylon-dark/10 rounded focus:outline-none focus:border-pylon-accent"
               >
@@ -285,6 +457,34 @@ export default function OperatorWorkloadsPage() {
             </div>
           </div>
 
+          {/* Selection controls */}
+          {filteredWorkloads.length > 0 && (
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-4">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={selectedWorkloads.size === filteredWorkloads.length && filteredWorkloads.length > 0}
+                    onChange={handleSelectAll}
+                    className="w-4 h-4 rounded border-pylon-dark/20 text-pylon-accent focus:ring-pylon-accent"
+                  />
+                  <span className="text-sm text-pylon-dark">
+                    Select All ({filteredWorkloads.length})
+                  </span>
+                </label>
+                {selectedWorkloads.size > 0 && (
+                  <button
+                    onClick={() => setShowDeleteConfirm(true)}
+                    className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-red-600 rounded hover:bg-red-700 transition-colors"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    Delete Selected ({selectedWorkloads.size})
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Results count */}
           <div className="text-sm text-pylon-dark/60">
             Showing {filteredWorkloads.length} of {workloads.length} workloads
@@ -302,9 +502,20 @@ export default function OperatorWorkloadsPage() {
                   key={workload.id}
                   className="bg-white rounded-lg border border-pylon-dark/5 hover:border-pylon-accent/30 hover:shadow-md transition-all p-6"
                 >
-                  <div className="flex items-start justify-between mb-4">
+                  <div className="flex items-start gap-4 mb-4">
+                    <input
+                      type="checkbox"
+                      checked={selectedWorkloads.has(workload.id)}
+                      onChange={(e) => {
+                        e.stopPropagation()
+                        handleSelectWorkload(workload.id)
+                      }}
+                      className="mt-1 w-4 h-4 rounded border-pylon-dark/20 text-pylon-accent focus:ring-pylon-accent cursor-pointer"
+                    />
                     <div className="flex-1">
-                      <div className="flex items-center gap-3 mb-2">
+                      <div className="flex items-start justify-between mb-4">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-3 mb-2">
                         <h3 className="text-lg font-semibold text-pylon-dark">
                           {workload.workload_name}
                         </h3>
@@ -326,9 +537,9 @@ export default function OperatorWorkloadsPage() {
                           <User className="w-3 h-3" />
                           {workload.user_email || 'Unknown'}
                         </span>
-                      </div>
-                    </div>
-                    <div className="text-right">
+                          </div>
+                        </div>
+                        <div className="text-right">
                       <div className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium ${
                         workload.urgency === 'CRITICAL' ? 'bg-red-100 text-red-700' :
                         workload.urgency === 'HIGH' ? 'bg-orange-100 text-orange-700' :
@@ -338,24 +549,65 @@ export default function OperatorWorkloadsPage() {
                         <AlertCircle className="w-3 h-3" />
                         {workload.urgency}
                       </div>
+                        </div>
+                      </div>
                     </div>
                   </div>
 
                   {/* Progress bar for running workloads */}
-                  {workload.status === 'RUNNING' && (
-                    <div className="mb-4">
-                      <div className="flex items-center justify-between text-xs mb-1">
-                        <span className="text-pylon-dark/60">Progress</span>
-                        <span className="font-medium text-pylon-dark">{workload.progress}%</span>
+                  {(workload.status === 'RUNNING' || workload.status === 'running') && (() => {
+                    // Calculate progress based on elapsed time / total runtime
+                    let calculatedProgress = 0
+                    try {
+                      const startTimeStr = workload.started_at
+                      const runtimeHours = workload.runtime_hours || workload.estimated_duration_hours
+                      
+                      if (startTimeStr && runtimeHours) {
+                        const startTime = new Date(startTimeStr).getTime()
+                        const now = Date.now()
+                        
+                        // Validate start time is not in the future and is a valid date
+                        if (isNaN(startTime) || startTime > now) {
+                          console.warn('Invalid start time for progress calculation:', startTimeStr)
+                          calculatedProgress = 0
+                        } else {
+                          const elapsedHours = (now - startTime) / (1000 * 60 * 60) // Convert ms to hours
+                          const totalHours = Number(runtimeHours)
+                          
+                          // Validate total hours is positive and reasonable (not more than 1 year)
+                          if (totalHours > 0 && totalHours < 8760 && elapsedHours >= 0) {
+                            calculatedProgress = Math.min(100, Math.max(0, (elapsedHours / totalHours) * 100))
+                          } else {
+                            console.warn('Invalid runtime hours for progress calculation:', totalHours)
+                            calculatedProgress = 0
+                          }
+                        }
+                      } else if (workload.status?.toLowerCase() === 'completed') {
+                        calculatedProgress = 100
+                      } else {
+                        // Fallback: if no start time or runtime, show 0% but don't error
+                        calculatedProgress = 0
+                      }
+                    } catch (err) {
+                      console.error('Error calculating progress:', err, workload)
+                      calculatedProgress = 0
+                    }
+                    
+                    return (
+                      <div className="mb-4">
+                        <div className="flex items-center justify-between text-xs mb-1">
+                          <span className="text-pylon-dark/60">Progress</span>
+                          <span className="font-medium text-pylon-dark">{Math.round(calculatedProgress)}%</span>
+                        </div>
+                        <div className="h-1.5 bg-pylon-dark/5 rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-pylon-accent rounded-full transition-all"
+                            style={{ width: `${Math.min(100, Math.max(0, calculatedProgress))}%` }}
+                          />
+                        </div>
                       </div>
-                      <div className="h-1.5 bg-pylon-dark/5 rounded-full overflow-hidden">
-                        <div
-                          className="h-full bg-pylon-accent rounded-full transition-all"
-                          style={{ width: `${workload.progress}%` }}
-                        />
-                      </div>
-                    </div>
-                  )}
+                    )
+                  })()}
 
                   {/* Location/Region Display */}
                   <div className="mb-4 pt-4 border-t border-pylon-dark/5">
@@ -430,20 +682,44 @@ export default function OperatorWorkloadsPage() {
                     </div>
                     <div className="flex items-center gap-2">
                       {workload.status === 'RUNNING' && (
-                        <>
-                          <button
-                            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-pylon-dark bg-white border border-pylon-dark/10 rounded hover:bg-amber-50 hover:text-amber-600 transition-colors"
-                          >
+                        <button
+                          onClick={() => handlePause(workload.id)}
+                          disabled={actionLoading === workload.id}
+                          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-pylon-dark bg-white border border-pylon-dark/10 rounded hover:bg-amber-50 hover:text-amber-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {actionLoading === workload.id ? (
+                            <Loader2 className="w-3 h-3 animate-spin" />
+                          ) : (
                             <Pause className="w-3 h-3" />
-                            Pause
-                          </button>
-                        </>
+                          )}
+                          Pause
+                        </button>
+                      )}
+                      {workload.status === 'PAUSED' && (
+                        <button
+                          onClick={() => handleResume(workload.id)}
+                          disabled={actionLoading === workload.id}
+                          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-green-600 bg-white border border-green-200 rounded hover:bg-green-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {actionLoading === workload.id ? (
+                            <Loader2 className="w-3 h-3 animate-spin" />
+                          ) : (
+                            <Play className="w-3 h-3" />
+                          )}
+                          Resume
+                        </button>
                       )}
                       {workload.status !== 'COMPLETED' && workload.status !== 'CANCELLED' && (
                         <button
-                          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-600 bg-white border border-red-200 rounded hover:bg-red-50 transition-colors"
+                          onClick={() => handleCancel(workload.id)}
+                          disabled={actionLoading === workload.id}
+                          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-600 bg-white border border-red-200 rounded hover:bg-red-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                         >
-                          <XCircle className="w-3 h-3" />
+                          {actionLoading === workload.id ? (
+                            <Loader2 className="w-3 h-3 animate-spin" />
+                          ) : (
+                            <XCircle className="w-3 h-3" />
+                          )}
                           Cancel
                         </button>
                       )}
@@ -466,6 +742,44 @@ export default function OperatorWorkloadsPage() {
                 Back to Dashboard
               </Link>
             </div>
+          )}
+
+          {/* Delete confirmation modal */}
+          {showDeleteConfirm && (
+            <>
+              <div className="fixed inset-0 bg-black/50 z-[100]" onClick={() => setShowDeleteConfirm(false)}></div>
+              <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 pointer-events-none">
+                <div className="bg-white rounded-lg max-w-md w-full p-6 pointer-events-auto">
+                  <h3 className="text-lg font-semibold text-pylon-dark mb-2">Delete Workloads</h3>
+                  <p className="text-sm text-pylon-dark/60 mb-6">
+                    Are you sure you want to delete {selectedWorkloads.size} workload{selectedWorkloads.size > 1 ? 's' : ''}? This action cannot be undone.
+                  </p>
+                  <div className="flex gap-3 justify-end">
+                    <button
+                      onClick={() => setShowDeleteConfirm(false)}
+                      disabled={deleting}
+                      className="px-4 py-2 text-sm font-medium text-pylon-dark bg-pylon-light rounded hover:bg-pylon-dark/10 transition-colors disabled:opacity-50"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={handleDeleteSelected}
+                      disabled={deleting}
+                      className="px-4 py-2 text-sm font-medium text-white bg-red-600 rounded hover:bg-red-700 transition-colors disabled:opacity-50 flex items-center gap-2"
+                    >
+                      {deleting ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          Deleting...
+                        </>
+                      ) : (
+                        'Delete'
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </>
           )}
         </>
       )}

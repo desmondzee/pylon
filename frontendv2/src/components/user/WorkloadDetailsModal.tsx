@@ -532,10 +532,11 @@ export default function WorkloadDetailsModal({
 
   return (
     <>
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-        <div className="bg-white rounded-xl shadow-xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+      <div className="fixed inset-0 z-[100] bg-black/50" onClick={onClose}></div>
+      <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 pointer-events-none">
+        <div className="bg-white rounded-xl shadow-xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col pointer-events-auto">
           <div className="overflow-y-auto flex-1">
-            <div className="p-6">
+          <div className="p-6">
             {/* Header */}
             <div className="flex items-start justify-between mb-6">
               <div className="flex-1">
@@ -647,43 +648,43 @@ export default function WorkloadDetailsModal({
                     {recommendedZones.map((zone, index) => {
                       const isSelected = workload.chosen_grid_zone === zone.id
                       return (
-                        <div
-                          key={zone.id}
+                      <div
+                        key={zone.id}
                           className={`border rounded-lg p-3 ${
                             isSelected
                               ? 'border-green-500 bg-green-50/50'
                               : 'border-pylon-dark/10 bg-pylon-light/30'
                           }`}
-                        >
-                          <div className="flex items-start justify-between">
+                      >
+                        <div className="flex items-start justify-between">
                             <div className="flex-1">
                               <div className="flex items-center gap-2 mb-1">
-                                <p className="text-sm font-medium text-pylon-dark">
-                                  {index + 1}. {zone.name}
-                                </p>
+                            <p className="text-sm font-medium text-pylon-dark">
+                              {index + 1}. {zone.name}
+                            </p>
                                 {isSelected && (
                                   <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold text-white bg-green-600">
                                     SELECTED OPTION
                                   </span>
                                 )}
                               </div>
-                              <div className="flex gap-4 mt-1 text-xs text-pylon-dark/60">
-                                {zone.carbon !== null && zone.carbon !== undefined && (
-                                  <span>
-                                    <Leaf className="w-3 h-3 inline mr-1" />
-                                    Carbon: {zone.carbon.toFixed(1)} gCO₂/kWh
-                                  </span>
-                                )}
-                                {zone.renewable !== null && zone.renewable !== undefined && (
-                                  <span>
-                                    <Zap className="w-3 h-3 inline mr-1" />
-                                    Renewable: {zone.renewable.toFixed(1)}%
-                                  </span>
-                                )}
-                              </div>
+                            <div className="flex gap-4 mt-1 text-xs text-pylon-dark/60">
+                              {zone.carbon !== null && zone.carbon !== undefined && (
+                                <span>
+                                  <Leaf className="w-3 h-3 inline mr-1" />
+                                  Carbon: {zone.carbon.toFixed(1)} gCO₂/kWh
+                                </span>
+                              )}
+                              {zone.renewable !== null && zone.renewable !== undefined && (
+                                <span>
+                                  <Zap className="w-3 h-3 inline mr-1" />
+                                  Renewable: {zone.renewable.toFixed(1)}%
+                                </span>
+                              )}
                             </div>
                           </div>
                         </div>
+                      </div>
                       )
                     })}
                   </div>
@@ -795,9 +796,9 @@ export default function WorkloadDetailsModal({
                         return <p className="text-sm font-medium text-pylon-dark">Pending</p>
                       }
                       if (workload.chosen_grid_zone) {
-                        if (locationName) {
-                          return <p className="text-sm font-medium text-pylon-dark">{locationName}</p>
-                        }
+                      if (locationName) {
+                        return <p className="text-sm font-medium text-pylon-dark">{locationName}</p>
+                      }
                         return <p className="text-sm font-medium text-pylon-dark">Awaiting user selection</p>
                       }
                       return <p className="text-sm font-medium text-pylon-dark">Awaiting user selection</p>
@@ -930,7 +931,7 @@ export default function WorkloadDetailsModal({
                     Note: Actions require a confirmed Beckn order. Please wait for order confirmation.
                   </p>
                 )}
-              </div>
+            </div>
 
               {/* Action Results */}
               {(() => {
@@ -1048,7 +1049,7 @@ export default function WorkloadDetailsModal({
 
       {/* Carbon Intensity Update Modal */}
       {showCarbonIntensityModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4 overflow-y-auto">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[110] p-4 overflow-y-auto">
           <div className="bg-white rounded-lg max-w-2xl w-full p-6 my-8">
             <h3 className="text-lg font-semibold text-pylon-dark mb-4 flex items-center gap-2">
               <TrendingUp className="w-5 h-5 text-pylon-accent" />
@@ -1191,7 +1192,7 @@ export default function WorkloadDetailsModal({
 
       {/* Workload Shift Modal */}
       {showWorkloadShiftModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4 overflow-y-auto">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[110] p-4 overflow-y-auto">
           <div className="bg-white rounded-lg max-w-2xl w-full p-6 my-8">
             <h3 className="text-lg font-semibold text-pylon-dark mb-4 flex items-center gap-2">
               <ArrowRightLeft className="w-5 h-5 text-blue-600" />
@@ -1347,7 +1348,7 @@ export default function WorkloadDetailsModal({
 
       {/* Rating Modal */}
       {showRatingModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[110] p-4">
           <div className="bg-white rounded-lg max-w-md w-full p-6">
             <h3 className="text-lg font-semibold text-pylon-dark mb-4 flex items-center gap-2">
               <Star className="w-5 h-5 text-amber-600" />

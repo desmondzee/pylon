@@ -3,7 +3,6 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import Image from 'next/image'
 import { ArrowLeft } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 
@@ -191,13 +190,11 @@ export default function UserSignInPage() {
       {/* Header with logo */}
       <div className="p-6 lg:p-8">
         <Link href="/">
-          <Image
+          <img
             src="/assets/Inverted.Pylon.Logo.png"
             alt="Pylon Logo"
-            width={120}
-            height={40}
-            priority
-            className="h-8 w-auto object-contain"
+            className="object-contain"
+            style={{ height: '130px', width: 'auto', minHeight: '130px' }}
           />
         </Link>
       </div>

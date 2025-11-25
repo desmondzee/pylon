@@ -11,6 +11,7 @@ import { GridZoneMap } from '@/lib/workload-types'
 import DataCenterMap from '@/components/operator/DataCenterMap'
 import DemoDataControls from '@/components/DemoDataControls'
 import StatusBadge from '@/components/common/StatusBadge'
+import { getUserProfile } from '@/lib/auth'
 
 export default function OperatorDashboard() {
   const router = useRouter()
@@ -28,6 +29,7 @@ export default function OperatorDashboard() {
     uniqueUsers: 0,
   })
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null)
+  const [actionLoading, setActionLoading] = useState<string | null>(null)
 
   // Load all workloads from Supabase
   const loadWorkloads = async () => {
@@ -288,18 +290,44 @@ export default function OperatorDashboard() {
                         <div className="flex items-center gap-1">
                           {workload.status === 'RUNNING' && (
                             <button
-                              className="p-1.5 text-pylon-dark/60 hover:text-amber-600 hover:bg-amber-50 rounded transition-colors"
+                              onClick={() => handlePause(workload.id)}
+                              disabled={actionLoading === workload.id}
+                              className="p-1.5 text-pylon-dark/60 hover:text-amber-600 hover:bg-amber-50 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                               title="Pause workload"
                             >
-                              <Pause className="w-4 h-4" />
+                              {actionLoading === workload.id ? (
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                              ) : (
+                                <Pause className="w-4 h-4" />
+                              )}
+                            </button>
+                          )}
+                          {workload.status === 'PAUSED' && (
+                            <button
+                              onClick={() => handleResume(workload.id)}
+                              disabled={actionLoading === workload.id}
+                              className="p-1.5 text-pylon-dark/60 hover:text-green-600 hover:bg-green-50 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                              title="Resume workload"
+                            >
+                              {actionLoading === workload.id ? (
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                              ) : (
+                                <Play className="w-4 h-4" />
+                              )}
                             </button>
                           )}
                           {workload.status !== 'COMPLETED' && workload.status !== 'CANCELLED' && (
                             <button
-                              className="p-1.5 text-pylon-dark/60 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                              onClick={() => handleCancel(workload.id)}
+                              disabled={actionLoading === workload.id}
+                              className="p-1.5 text-pylon-dark/60 hover:text-red-600 hover:bg-red-50 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                               title="Cancel workload"
                             >
-                              <XCircle className="w-4 h-4" />
+                              {actionLoading === workload.id ? (
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                              ) : (
+                                <XCircle className="w-4 h-4" />
+                              )}
                             </button>
                           )}
                         </div>
