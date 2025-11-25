@@ -2,6 +2,8 @@ import os
 import logging
 import uuid
 import json
+import asyncio
+import threading
 from datetime import datetime, timezone
 from flask import Flask, request, jsonify
 from dotenv import load_dotenv
@@ -19,6 +21,15 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
+
+# Import BPP Orchestrator
+try:
+    from services.bpp_orchestrator import orchestrator
+    BPP_ORCHESTRATOR_ENABLED = True
+    logger.info("BPP Orchestrator loaded successfully")
+except Exception as e:
+    BPP_ORCHESTRATOR_ENABLED = False
+    logger.warning(f"BPP Orchestrator not available: {e}")
 
 # Initialize Agents
 compute_agent = ComputeAgent()
@@ -810,6 +821,35 @@ def get_recommendations(workload_id):
         logger.error(f"Error getting recommendations: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
+def start_bpp_orchestrator_background():
+    """Start the BPP orchestrator in a background thread"""
+    if not BPP_ORCHESTRATOR_ENABLED:
+        logger.info("BPP Orchestrator disabled")
+        return
+
+    def run_async_loop():
+        """Run the async event loop in a separate thread"""
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            logger.info("Starting BPP Orchestrator background task...")
+            loop.run_until_complete(orchestrator.start_polling())
+        except Exception as e:
+            logger.error(f"BPP Orchestrator error: {e}", exc_info=True)
+        finally:
+            loop.close()
+
+    # Start the background thread
+    bg_thread = threading.Thread(target=run_async_loop, daemon=True)
+    bg_thread.start()
+    logger.info("BPP Orchestrator background thread started")
+
+
 if __name__ == '__main__':
+    # Start BPP Orchestrator before starting Flask
+    start_bpp_orchestrator_background()
+
+    # Start Flask server
     port = int(os.getenv('PORT', 5001))
+    logger.info(f"Starting Flask server on port {port}")
     app.run(host='0.0.0.0', port=port)

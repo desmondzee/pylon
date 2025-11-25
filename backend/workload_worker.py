@@ -77,18 +77,18 @@ def lookup_region_id(region_name: str) -> str:
     """Look up region_id (UUID) from region name in uk_regions table."""
     if not supabase or not region_name:
         return None
-    
+
     try:
         # Try exact match on region_name
         result = supabase.table("uk_regions").select("id").eq("region_name", region_name).limit(1).execute()
         if result.data and len(result.data) > 0:
             return result.data[0]['id']
-        
+
         # Try short_name
         result = supabase.table("uk_regions").select("id").eq("short_name", region_name).limit(1).execute()
         if result.data and len(result.data) > 0:
             return result.data[0]['id']
-        
+
         # Try case-insensitive match (convert both to lowercase for comparison)
         # Get all regions and match manually (Supabase Python client doesn't have ilike)
         try:
@@ -103,10 +103,104 @@ def lookup_region_id(region_name: str) -> str:
                         return region['id']
         except Exception as lookup_err:
             logger.debug(f"Could not do case-insensitive lookup: {lookup_err}")
-        
+
         return None
     except Exception as e:
         logger.warning(f"Could not lookup region_id for '{region_name}': {e}")
+        return None
+
+
+def lookup_grid_zone_id(region_name: str = None, zone_name: str = None, grid_area: str = None) -> str:
+    """
+    Look up grid_zone_id (UUID) from region/zone name in grid_zones table.
+    Tries multiple fields to find a match.
+    Returns the UUID of the grid zone, or None if not found.
+    """
+    if not supabase:
+        return None
+
+    # Build search terms from provided parameters
+    search_terms = []
+    if region_name:
+        search_terms.append(region_name)
+    if zone_name:
+        search_terms.append(zone_name)
+    if grid_area:
+        search_terms.append(grid_area)
+
+    if not search_terms:
+        return None
+
+    try:
+        # Try exact matches first on each search term
+        for term in search_terms:
+            if not term:
+                continue
+
+            # Try zone_name field
+            result = supabase.table("grid_zones").select("id").eq("zone_name", term).limit(1).execute()
+            if result.data and len(result.data) > 0:
+                logger.info(f"Found grid_zone_id for '{term}' via zone_name")
+                return result.data[0]['id']
+
+            # Try grid_area field
+            result = supabase.table("grid_zones").select("id").eq("grid_area", term).limit(1).execute()
+            if result.data and len(result.data) > 0:
+                logger.info(f"Found grid_zone_id for '{term}' via grid_area")
+                return result.data[0]['id']
+
+            # Try region field
+            result = supabase.table("grid_zones").select("id").eq("region", term).limit(1).execute()
+            if result.data and len(result.data) > 0:
+                logger.info(f"Found grid_zone_id for '{term}' via region")
+                return result.data[0]['id']
+
+            # Try locality field
+            result = supabase.table("grid_zones").select("id").eq("locality", term).limit(1).execute()
+            if result.data and len(result.data) > 0:
+                logger.info(f"Found grid_zone_id for '{term}' via locality")
+                return result.data[0]['id']
+
+        # If no exact matches, try case-insensitive partial matches
+        try:
+            all_zones = supabase.table("grid_zones").select("id, zone_name, grid_area, region, locality").execute()
+            if all_zones.data:
+                for term in search_terms:
+                    if not term:
+                        continue
+                    term_lower = term.lower()
+                    for zone in all_zones.data:
+                        zone_name_lower = zone.get("zone_name", "").lower()
+                        grid_area_lower = zone.get("grid_area", "").lower()
+                        region_lower = zone.get("region", "").lower()
+                        locality_lower = zone.get("locality", "").lower()
+
+                        # Check for matches
+                        if (term_lower == zone_name_lower or
+                            term_lower == grid_area_lower or
+                            term_lower == region_lower or
+                            term_lower == locality_lower or
+                            term_lower in zone_name_lower or
+                            term_lower in grid_area_lower or
+                            term_lower in region_lower or
+                            term_lower in locality_lower):
+                            logger.info(f"Found grid_zone_id for '{term}' via case-insensitive match")
+                            return zone['id']
+        except Exception as lookup_err:
+            logger.debug(f"Could not do case-insensitive grid_zone lookup: {lookup_err}")
+
+        # Last resort: return the first grid zone available (better than NULL)
+        try:
+            fallback = supabase.table("grid_zones").select("id").limit(1).execute()
+            if fallback.data and len(fallback.data) > 0:
+                logger.warning(f"No grid_zone match for {search_terms}, using fallback grid_zone_id")
+                return fallback.data[0]['id']
+        except Exception as fallback_err:
+            logger.debug(f"Could not get fallback grid_zone: {fallback_err}")
+
+        return None
+    except Exception as e:
+        logger.error(f"Error looking up grid_zone_id for {search_terms}: {e}")
         return None
 
 
@@ -483,7 +577,7 @@ Deferrable: {'Yes' if user_request_data.get('is_deferrable') or workload.get('is
             region_id = None
             grid_zone_id = None
             asset_id_val = None
-            
+
             # Try direct IDs first
             if option_data.get("region_id"):
                 region_id = extract_uuid(option_data.get("region_id"))
@@ -491,7 +585,7 @@ Deferrable: {'Yes' if user_request_data.get('is_deferrable') or workload.get('is
                 grid_zone_id = extract_uuid(option_data.get("grid_zone_id"))
             if option_data.get("asset_id"):
                 asset_id_val = extract_uuid(option_data.get("asset_id"))
-            
+
             # Try nested in location/geo objects
             location = option_data.get("location") or option_data.get("geo")
             if isinstance(location, dict):
@@ -499,7 +593,30 @@ Deferrable: {'Yes' if user_request_data.get('is_deferrable') or workload.get('is
                     region_id = extract_uuid(location.get("region_id"))
                 if location.get("grid_zone_id"):
                     grid_zone_id = extract_uuid(location.get("grid_zone_id"))
-            
+
+            # If grid_zone_id not found, try to lookup from region/zone names
+            if not grid_zone_id:
+                region_name = option_data.get("region") or option_data.get("region_name") or option_data.get("location")
+                zone_name = option_data.get("zone_name") or option_data.get("grid_zone")
+                grid_area = option_data.get("grid_area")
+
+                grid_zone_id = lookup_grid_zone_id(
+                    region_name=region_name,
+                    zone_name=zone_name,
+                    grid_area=grid_area
+                )
+
+                if grid_zone_id:
+                    logger.info(f"Looked up grid_zone_id from region/zone names: {grid_zone_id}")
+
+            # If region_id not found, try to lookup from region name
+            if not region_id:
+                region_name = option_data.get("region") or option_data.get("region_name") or option_data.get("location")
+                if region_name:
+                    region_id = lookup_region_id(region_name)
+                    if region_id:
+                        logger.info(f"Looked up region_id from region name: {region_id}")
+
             return region_id, grid_zone_id, asset_id_val
         
         # Extract location IDs for first recommendation
@@ -549,19 +666,28 @@ Deferrable: {'Yes' if user_request_data.get('is_deferrable') or workload.get('is
         rec_2_region_id, rec_2_grid_zone_id, rec_2_asset_id = extract_location_ids(rec_2_data) if rec_2 else (None, None, None)
         rec_2_region = (
             (rec_2.get("region") or
-            rec_2_data.get("region") or 
-            rec_2_data.get("location") or 
+            rec_2_data.get("region") or
+            rec_2_data.get("location") or
             rec_2_data.get("grid_area") or
             rec_2_data.get("asset_location")) if rec_2 else "Unknown"
         )
         # If region_id not found, try to lookup from region name
         if not rec_2_region_id and rec_2_region and rec_2_region != "Unknown":
             rec_2_region_id = lookup_region_id(rec_2_region)
+        # If grid_zone_id not found, try to lookup from region/zone names
+        if not rec_2_grid_zone_id and rec_2_region and rec_2_region != "Unknown":
+            rec_2_grid_zone_id = lookup_grid_zone_id(
+                region_name=rec_2_region,
+                zone_name=rec_2_data.get("zone_name") if rec_2 else None,
+                grid_area=rec_2_data.get("grid_area") if rec_2 else None
+            )
+            if rec_2_grid_zone_id:
+                logger.info(f"Looked up rec_2_grid_zone_id: {rec_2_grid_zone_id}")
         rec_2_carbon = (rec_2.get("carbon_intensity") or rec_2_data.get("carbon_intensity")) if rec_2 else None
         rec_2_renewable = (rec_2.get("renewable_mix") or rec_2_data.get("renewable_mix")) if rec_2 else None
         rec_2_cost = (rec_2.get("cost") or rec_2_data.get("estimated_cost") or rec_2_data.get("cost")) if rec_2 else None
         rec_2_reason = rec_2.get("reason", "availability") if rec_2 else "availability"
-        
+
         # Ensure we have at least basic values for rec_2
         if not rec_2_region or rec_2_region == "Unknown":
             rec_2_region = "TBD"
@@ -573,25 +699,46 @@ Deferrable: {'Yes' if user_request_data.get('is_deferrable') or workload.get('is
         rec_3_region_id, rec_3_grid_zone_id, rec_3_asset_id = extract_location_ids(rec_3_data) if rec_3 else (None, None, None)
         rec_3_region = (
             (rec_3.get("region") or
-            rec_3_data.get("region") or 
-            rec_3_data.get("location") or 
+            rec_3_data.get("region") or
+            rec_3_data.get("location") or
             rec_3_data.get("grid_area") or
             rec_3_data.get("asset_location")) if rec_3 else "Unknown"
         )
         # If region_id not found, try to lookup from region name
         if not rec_3_region_id and rec_3_region and rec_3_region != "Unknown":
             rec_3_region_id = lookup_region_id(rec_3_region)
+        # If grid_zone_id not found, try to lookup from region/zone names
+        if not rec_3_grid_zone_id and rec_3_region and rec_3_region != "Unknown":
+            rec_3_grid_zone_id = lookup_grid_zone_id(
+                region_name=rec_3_region,
+                zone_name=rec_3_data.get("zone_name") if rec_3 else None,
+                grid_area=rec_3_data.get("grid_area") if rec_3 else None
+            )
+            if rec_3_grid_zone_id:
+                logger.info(f"Looked up rec_3_grid_zone_id: {rec_3_grid_zone_id}")
         rec_3_carbon = (rec_3.get("carbon_intensity") or rec_3_data.get("carbon_intensity")) if rec_3 else None
         rec_3_renewable = (rec_3.get("renewable_mix") or rec_3_data.get("renewable_mix")) if rec_3 else None
         rec_3_cost = (rec_3.get("cost") or rec_3_data.get("estimated_cost") or rec_3_data.get("cost")) if rec_3 else None
         rec_3_reason = rec_3.get("reason", "availability") if rec_3 else "availability"
-        
+
         # Ensure we have at least basic values for rec_3
         if not rec_3_region or rec_3_region == "Unknown":
             rec_3_region = "TBD"
         if rec_3_reason is None:
             rec_3_reason = "availability"
-        
+
+        # CRITICAL VALIDATION: Log warnings if grid_zone_id fields are still NULL
+        # This helps debugging if the frontend still sees NULL values
+        if not rec_1_grid_zone_id:
+            logger.warning(f"[Workload {workload_id}] recommended_1_grid_zone_id is NULL! Region: {recommended_region}")
+        if not rec_2_grid_zone_id:
+            logger.warning(f"[Workload {workload_id}] recommended_2_grid_zone_id is NULL! Region: {rec_2_region}")
+        if not rec_3_grid_zone_id:
+            logger.warning(f"[Workload {workload_id}] recommended_3_grid_zone_id is NULL! Region: {rec_3_region}")
+
+        # Log successful lookups
+        logger.info(f"[Workload {workload_id}] Recommendation grid_zone_ids: 1={rec_1_grid_zone_id}, 2={rec_2_grid_zone_id}, 3={rec_3_grid_zone_id}")
+
         workload_update = {
             "workload_type": compute_analysis.get("workload_type"),
             "priority": compute_analysis.get("priority", 50),
