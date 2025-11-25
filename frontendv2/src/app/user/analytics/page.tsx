@@ -434,15 +434,16 @@ export default function AnalyticsPage() {
             <div className="h-64 flex items-end justify-between gap-1 overflow-hidden">
               {data.chartData.map((value: number, idx: number) => {
                 const maxValue = Math.max(...data.chartData)
-                const normalizedHeight = Math.min((value / maxValue) * 100, 100)
+                // Ensure minimum 2% height for visibility, even if value is 0
+                const normalizedHeight = value === 0 ? 2 : Math.max(2, Math.min((value / maxValue) * 100, 100))
                 return (
                   <div
                     key={idx}
                     className="flex-1 bg-pylon-accent/20 rounded-t hover:bg-pylon-accent transition-colors relative group min-w-[2px]"
                     style={{ height: `${normalizedHeight}%`, maxHeight: '100%' }}
                   >
-                    <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 bg-pylon-dark text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10">
-                      {(value * 10).toFixed(1)} kWh
+                    <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 bg-pylon-dark text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10 pointer-events-none">
+                      {value.toFixed(2)} kWh
                     </div>
                   </div>
                 )
