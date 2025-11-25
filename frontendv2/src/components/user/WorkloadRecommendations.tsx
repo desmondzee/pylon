@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { MapPin, CheckCircle2, Loader2 } from 'lucide-react'
+import { MapPin, CheckCircle2, Loader2, Leaf, Zap } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { GridZoneMeta, GridZoneMap } from '@/lib/workload-types'
 import { formatGridZoneLabel } from '@/lib/grid-zones'
@@ -15,6 +15,13 @@ interface WorkloadRecommendationsProps {
   chosenGridZoneId: string | null
   gridZoneMap: GridZoneMap
   onSelectionComplete: () => void
+  // Optional recommendation metadata
+  recommended1Carbon?: number | null
+  recommended1Renewable?: number | null
+  recommended2Carbon?: number | null
+  recommended2Renewable?: number | null
+  recommended3Carbon?: number | null
+  recommended3Renewable?: number | null
 }
 
 export default function WorkloadRecommendations({
@@ -26,6 +33,12 @@ export default function WorkloadRecommendations({
   chosenGridZoneId,
   gridZoneMap,
   onSelectionComplete,
+  recommended1Carbon,
+  recommended1Renewable,
+  recommended2Carbon,
+  recommended2Renewable,
+  recommended3Carbon,
+  recommended3Renewable,
 }: WorkloadRecommendationsProps) {
   const supabase = createClient()
   const [selecting, setSelecting] = useState(false)
@@ -65,17 +78,37 @@ export default function WorkloadRecommendations({
     )
   }
 
-  // Show recommendations
-  const recommendations: Array<{ id: string; zone: GridZoneMeta }> = []
+  // Show recommendations with metadata
+  const recommendations: Array<{ 
+    id: string
+    zone: GridZoneMeta
+    carbon?: number | null
+    renewable?: number | null
+  }> = []
   
   if (recommended1Id && gridZoneMap[recommended1Id]) {
-    recommendations.push({ id: recommended1Id, zone: gridZoneMap[recommended1Id] })
+    recommendations.push({ 
+      id: recommended1Id, 
+      zone: gridZoneMap[recommended1Id],
+      carbon: recommended1Carbon,
+      renewable: recommended1Renewable,
+    })
   }
   if (recommended2Id && gridZoneMap[recommended2Id]) {
-    recommendations.push({ id: recommended2Id, zone: gridZoneMap[recommended2Id] })
+    recommendations.push({ 
+      id: recommended2Id, 
+      zone: gridZoneMap[recommended2Id],
+      carbon: recommended2Carbon,
+      renewable: recommended2Renewable,
+    })
   }
   if (recommended3Id && gridZoneMap[recommended3Id]) {
-    recommendations.push({ id: recommended3Id, zone: gridZoneMap[recommended3Id] })
+    recommendations.push({ 
+      id: recommended3Id, 
+      zone: gridZoneMap[recommended3Id],
+      carbon: recommended3Carbon,
+      renewable: recommended3Renewable,
+    })
   }
 
   const handleSelect = async (selectedZoneId: string) => {
@@ -147,9 +180,25 @@ export default function WorkloadRecommendations({
                 <p className="text-sm font-medium text-pylon-dark">
                   {formatGridZoneLabel(rec.zone)}
                 </p>
-                <p className="text-xs text-pylon-dark/50 mt-1">
+                <p className="text-xs text-pylon-dark/50 mt-1 mb-2">
                   Option {index + 1}
                 </p>
+                {(rec.carbon !== null && rec.carbon !== undefined) || (rec.renewable !== null && rec.renewable !== undefined) ? (
+                  <div className="flex flex-col gap-1 text-xs text-pylon-dark/60">
+                    {rec.carbon !== null && rec.carbon !== undefined && (
+                      <div className="flex items-center gap-1">
+                        <Leaf className="w-3 h-3" />
+                        <span>Carbon: {rec.carbon.toFixed(1)} gCO₂/kWh</span>
+                      </div>
+                    )}
+                    {rec.renewable !== null && rec.renewable !== undefined && (
+                      <div className="flex items-center gap-1">
+                        <Zap className="w-3 h-3" />
+                        <span>Renewable: {rec.renewable.toFixed(1)}%</span>
+                      </div>
+                    )}
+                  </div>
+                ) : null}
               </div>
               {selecting && (
                 <Loader2 className="w-4 h-4 text-pylon-accent animate-spin flex-shrink-0" />

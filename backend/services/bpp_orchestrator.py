@@ -543,12 +543,35 @@ def process_workload(workload: dict) -> bool:
         grid_zone_item_id = get_grid_zone_item_id(grid_zone_id)
         logger.info(f"[{workload_id}] Using chosen grid_zone_id: {grid_zone_id} -> item_id: {grid_zone_item_id}")
         
-        # Step 2: Update bpp_processed flag to prevent double processing (status already 'scheduled' from frontend)
-        supabase.table("compute_workloads").update({
-            "bpp_processed": False,  # Keep False until we complete
-            "updated_at": datetime.now(timezone.utc).isoformat()
-        }).eq("id", workload_id).execute()
-        logger.info(f"[{workload_id}] Marked for BPP processing")
+        # Step 2: Generate or ensure beckn_order_id exists (needed for UPDATE/STATUS/RATING/SUPPORT actions)
+        # Generate a preliminary order ID that will be used/updated during the BPP flow
+        existing_beckn_order_id = workload.get('beckn_order_id')
+        if not existing_beckn_order_id:
+            # Generate a preliminary order ID in the format: order-{workload_id}-{short_uuid}
+            preliminary_order_id = f"order-{workload_id}-{uuid.uuid4().hex[:8]}"
+            logger.info(f"[{workload_id}] Generating preliminary beckn_order_id: {preliminary_order_id}")
+            
+            # Update the workload with the preliminary order ID immediately
+            supabase.table("compute_workloads").update({
+                "beckn_order_id": preliminary_order_id,
+                "bpp_processed": False,  # Keep False until we complete
+                "updated_at": datetime.now(timezone.utc).isoformat()
+            }).eq("id", workload_id).execute()
+            
+            # Update the workload dict for use in subsequent steps
+            workload['beckn_order_id'] = preliminary_order_id
+            beckn_order_id = preliminary_order_id
+        else:
+            beckn_order_id = existing_beckn_order_id
+            logger.info(f"[{workload_id}] Using existing beckn_order_id: {beckn_order_id}")
+            
+            # Still update bpp_processed flag
+            supabase.table("compute_workloads").update({
+                "bpp_processed": False,  # Keep False until we complete
+                "updated_at": datetime.now(timezone.utc).isoformat()
+            }).eq("id", workload_id).execute()
+        
+        logger.info(f"[{workload_id}] Marked for BPP processing with beckn_order_id: {beckn_order_id}")
         
         # Step 3: Call SELECT
         logger.info(f"[{workload_id}] Step 1: Calling SELECT")
@@ -579,18 +602,41 @@ def process_workload(workload: dict) -> bool:
         confirm_response = confirm_result.get('data')
         logger.info(f"[{workload_id}] CONFIRM successful")
         
+        # Extract beckn_order_id from CONFIRM response and update if different
+        # Get the preliminary order ID we set earlier
+        preliminary_beckn_order_id = workload.get('beckn_order_id')
+        
+        confirmed_beckn_order_id = None
+        try:
+            order = confirm_response.get('message', {}).get('order', {})
+            confirmed_beckn_order_id = order.get('beckn:id') or order_id  # Fallback to our generated order_id
+            logger.info(f"[{workload_id}] Extracted beckn_order_id from CONFIRM: {confirmed_beckn_order_id}")
+        except Exception as e:
+            logger.warning(f"[{workload_id}] Could not extract beckn_order_id from response, using generated: {e}")
+            confirmed_beckn_order_id = order_id
+        
+        # Use the confirmed order ID (may be same as preliminary or different)
+        # If different, update the database with the confirmed one
+        final_beckn_order_id = confirmed_beckn_order_id
+        if preliminary_beckn_order_id and final_beckn_order_id != preliminary_beckn_order_id:
+            logger.info(f"[{workload_id}] Updating beckn_order_id from {preliminary_beckn_order_id} to {final_beckn_order_id}")
+        
         # Step 6: Summarize with Gemini
         logger.info(f"[{workload_id}] Step 4: Generating summary with Gemini")
         llm_summary = summarize_responses(select_response, init_response, confirm_response)
         logger.info(f"[{workload_id}] Summary generated ({len(llm_summary)} chars): {llm_summary[:150]}...")
         
-        # Step 7: Update Supabase with summary and set status to 'running'
-        logger.info(f"[{workload_id}] Step 5: Updating Supabase with LLM summary")
+        # Step 7: Update Supabase with summary, final beckn_order_id, and set status to 'running'
+        # Also set actual_start timestamp for completion tracking
+        now = datetime.now(timezone.utc)
+        logger.info(f"[{workload_id}] Step 5: Updating Supabase with LLM summary and final beckn_order_id")
         update_result = supabase.table("compute_workloads").update({
             "LLM_select_init_confirm": llm_summary,
+            "beckn_order_id": final_beckn_order_id,  # Use the confirmed order ID
             "bpp_processed": True,
             "status": "running",
-            "updated_at": datetime.now(timezone.utc).isoformat()
+            "actual_start": now.isoformat(),  # Set start time for completion tracking
+            "updated_at": now.isoformat()
         }).eq("id", workload_id).execute()
         
         if update_result.data:

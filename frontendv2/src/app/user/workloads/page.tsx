@@ -3,12 +3,14 @@
 import { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { Server, Search, Filter, Download, ArrowUpDown, ChevronRight, Zap, Clock, Leaf, AlertCircle, Trash2, X } from 'lucide-react'
+import { Server, Search, Filter, Download, ArrowUpDown, ChevronRight, Zap, Clock, Leaf, AlertCircle, Trash2, X, Brain } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { WorkloadWithRecommendations } from '@/lib/workload-types'
 import { fetchGridZones } from '@/lib/grid-zones'
 import { GridZoneMap } from '@/lib/workload-types'
 import WorkloadRecommendations from '@/components/user/WorkloadRecommendations'
+import WorkloadDetailsModal from '@/components/user/WorkloadDetailsModal'
+import { parseLLMSummary, resolveZoneName, getStatusBadgeClasses, getStatusDisplayText } from '@/lib/workload-utils'
 
 // Mock data for reference (will be replaced with Supabase data)
 const mockWorkloads = [
@@ -248,6 +250,32 @@ export default function WorkloadsPage() {
         recommended_3_grid_zone_id: w.recommended_3_grid_zone_id || null,
         chosen_grid_zone: w.chosen_grid_zone || null,
         user_id: w.user_id,
+        // Additional fields
+        LLM_select_init_confirm: w.LLM_select_init_confirm || null,
+        runtime_hours: w.runtime_hours || null,
+        estimated_duration_hours: w.estimated_duration_hours || null,
+        user_notes: w.user_notes || null,
+        requested_compute: w.requested_compute || null,
+        carbon_intensity_cap: w.carbon_intensity_cap || w.max_carbon_intensity_gco2_kwh || null,
+        flex_type: w.flex_type || null,
+        // Recommendation metadata
+        recommended_carbon_intensity: w.recommended_carbon_intensity || null,
+        recommended_renewable_mix: w.recommended_renewable_mix || null,
+        recommended_2_carbon_intensity: w.recommended_2_carbon_intensity || null,
+        recommended_2_renewable_mix: w.recommended_2_renewable_mix || null,
+        recommended_3_carbon_intensity: w.recommended_3_carbon_intensity || null,
+        recommended_3_renewable_mix: w.recommended_3_renewable_mix || null,
+        // BPP fields
+        beckn_order_id: w.beckn_order_id || null,
+        update_request_pending: w.update_request_pending || false,
+        status_query_pending: w.status_query_pending || false,
+        rating_request_pending: w.rating_request_pending || false,
+        support_request_pending: w.support_request_pending || false,
+        // Action results
+        llm_update_response: w.llm_update_response || null,
+        llm_status_response: w.llm_status_response || null,
+        llm_rating_response: w.llm_rating_response || null,
+        llm_support_response: w.llm_support_response || null,
       }))
 
       setWorkloads(transformedWorkloads)
@@ -513,9 +541,9 @@ export default function WorkloadsPage() {
         {filteredWorkloads.map((workload) => (
           <div
             key={workload.id}
-            className="bg-white rounded-lg border border-pylon-dark/5 hover:border-pylon-accent/30 hover:shadow-md transition-all p-6 group"
+            className="bg-white rounded-lg border border-pylon-dark/5 hover:border-pylon-accent/30 hover:shadow-md transition-all p-6 group mb-4"
           >
-            <div className="flex items-start gap-4 mb-4">
+            <div className="flex items-start gap-4 mb-5">
               <input
                 type="checkbox"
                 checked={selectedWorkloads.has(workload.id)}
@@ -531,24 +559,19 @@ export default function WorkloadsPage() {
               >
                 <div className="flex items-start justify-between mb-4">
                   <div className="flex-1">
-                    <div className="flex items-center gap-3 mb-2">
+                    <div className="flex items-center gap-3 mb-2 flex-wrap">
                       <h3 className="text-lg font-semibold text-pylon-dark group-hover:text-pylon-accent transition-colors">
                         {workload.workload_name}
                       </h3>
-                  <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                    workload.status === 'RUNNING' ? 'bg-pylon-accent/10 text-pylon-accent' :
-                    workload.status === 'COMPLETED' ? 'bg-pylon-dark/5 text-pylon-dark/60' :
-                    workload.status === 'QUEUED' ? 'bg-amber-50 text-amber-600' :
-                    'bg-red-50 text-red-600'
-                  }`}>
-                    {workload.status}
-                  </span>
-                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-pylon-light text-pylon-dark">
-                    {workloadTypeLabels[workload.workload_type]}
-                  </span>
-                </div>
-                <p className="text-sm text-pylon-dark/60 font-mono">{workload.job_id}</p>
-              </div>
+                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusBadgeClasses(workload.status)}`}>
+                        {getStatusDisplayText(workload.status)}
+                      </span>
+                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-pylon-light text-pylon-dark">
+                        {workloadTypeLabels[workload.workload_type] || workload.workload_type}
+                      </span>
+                    </div>
+                    <p className="text-sm text-pylon-dark/60 font-mono">{workload.job_id}</p>
+                  </div>
               <div className="text-right">
                 <div className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium ${
                   workload.urgency === 'CRITICAL' ? 'bg-red-100 text-red-700' :
@@ -563,13 +586,13 @@ export default function WorkloadsPage() {
             </div>
 
             {/* Progress bar for running workloads */}
-            {workload.status === 'RUNNING' && (
-              <div className="mb-4">
-                <div className="flex items-center justify-between text-xs mb-1">
+            {(workload.status === 'RUNNING' || workload.status === 'running') && (
+              <div className="mb-5">
+                <div className="flex items-center justify-between text-xs mb-1.5">
                   <span className="text-pylon-dark/60">Progress</span>
                   <span className="font-medium text-pylon-dark">{workload.progress}%</span>
                 </div>
-                <div className="h-1.5 bg-pylon-dark/5 rounded-full overflow-hidden">
+                <div className="h-2 bg-pylon-dark/5 rounded-full overflow-hidden">
                   <div
                     className="h-full bg-pylon-accent rounded-full transition-all"
                     style={{ width: `${workload.progress}%` }}
@@ -578,15 +601,54 @@ export default function WorkloadsPage() {
               </div>
             )}
 
+            {/* LLM Summary Preview */}
+            {workload.LLM_select_init_confirm && (() => {
+              const llmPreview = parseLLMSummary(workload.LLM_select_init_confirm)
+              const summaryText = llmPreview?.summary || ''
+              if (summaryText) {
+                return (
+                  <div className="mb-4 p-3 bg-gradient-to-r from-pylon-accent/5 to-transparent border-l-2 border-pylon-accent rounded">
+                    <div className="flex items-start gap-2">
+                      <Brain className="w-4 h-4 text-pylon-accent flex-shrink-0 mt-0.5" />
+                      <div className="flex-1">
+                        <p className="text-xs font-medium text-pylon-dark/80 mb-1">AI Summary:</p>
+                        <p className="text-xs text-pylon-dark/70 line-clamp-2">
+                          {summaryText.length > 120 ? `${summaryText.substring(0, 120)}...` : summaryText}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )
+              }
+              return null
+            })()}
+
             {/* Workload details grid */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-5">
               <div>
                 <div className="flex items-center gap-1.5 text-xs text-pylon-dark/40 mb-1">
                   <Server className="w-3.5 h-3.5" />
                   Location
                 </div>
-                <p className="text-sm font-medium text-pylon-dark">{workload.host_dc}</p>
-                <p className="text-xs text-pylon-dark/60">{workload.region}</p>
+                {(() => {
+                  const statusUpper = workload.status.toUpperCase()
+                  if (statusUpper === 'PENDING' || statusUpper === 'PENDING_USER_CHOICE') {
+                    return <p className="text-sm font-medium text-pylon-dark">Pending</p>
+                  }
+                  if (workload.chosen_grid_zone) {
+                    const zone = gridZoneMap[workload.chosen_grid_zone]
+                    if (zone) {
+                      return (
+                        <>
+                          <p className="text-sm font-medium text-pylon-dark">{zone.zoneName}</p>
+                          <p className="text-xs text-pylon-dark/60">({zone.gridZoneCode})</p>
+                        </>
+                      )
+                    }
+                    return <p className="text-sm font-medium text-pylon-dark">Awaiting region selection</p>
+                  }
+                  return <p className="text-sm font-medium text-pylon-dark">{workload.host_dc || 'Not assigned'}</p>
+                })()}
               </div>
               <div>
                 <div className="flex items-center gap-1.5 text-xs text-pylon-dark/40 mb-1">
@@ -635,15 +697,21 @@ export default function WorkloadsPage() {
                 chosenGridZoneId={workload.chosen_grid_zone}
                 gridZoneMap={gridZoneMap}
                 onSelectionComplete={loadWorkloads}
+                recommended1Carbon={workload.recommended_carbon_intensity}
+                recommended1Renewable={workload.recommended_renewable_mix}
+                recommended2Carbon={workload.recommended_2_carbon_intensity}
+                recommended2Renewable={workload.recommended_2_renewable_mix}
+                recommended3Carbon={workload.recommended_3_carbon_intensity}
+                recommended3Renewable={workload.recommended_3_renewable_mix}
               />
             )}
 
             {/* Footer */}
-            <div className="flex items-center justify-between pt-4 border-t border-pylon-dark/5">
-              <div className="text-xs text-pylon-dark/40">
+            <div className="flex items-center justify-between pt-4 border-t border-pylon-dark/5 mt-5">
+              <div className="text-xs text-pylon-dark/50">
                 Created {new Date(workload.created_at).toLocaleDateString()} at {new Date(workload.created_at).toLocaleTimeString()}
               </div>
-              <div className="flex items-center gap-1 text-xs font-medium text-pylon-accent opacity-0 group-hover:opacity-100 transition-opacity">
+              <div className="flex items-center gap-1 text-xs font-medium text-pylon-accent opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer">
                 Click to view details
                 <ChevronRight className="w-4 h-4" />
               </div>
@@ -709,181 +777,12 @@ export default function WorkloadsPage() {
 
       {/* Workload detail modal */}
       {selectedWorkloadDetail && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-            <div className="p-6">
-              <div className="flex items-start justify-between mb-6">
-                <div>
-                  <h3 className="text-xl font-semibold text-pylon-dark mb-2">
-                    {selectedWorkloadDetail.workload_name}
-                  </h3>
-                  <p className="text-sm text-pylon-dark/60 font-mono">{selectedWorkloadDetail.job_id}</p>
-                </div>
-                <button
-                  onClick={() => setSelectedWorkloadDetail(null)}
-                  className="p-2 text-pylon-dark/40 hover:text-pylon-dark hover:bg-pylon-light rounded transition-colors"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-
-              <div className="space-y-6">
-                {/* Status and Type */}
-                <div className="flex gap-4">
-                  <div className="flex-1">
-                    <p className="text-xs text-pylon-dark/60 mb-2">Status</p>
-                    <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${
-                      selectedWorkloadDetail.status === 'RUNNING' ? 'bg-pylon-accent/10 text-pylon-accent' :
-                      selectedWorkloadDetail.status === 'COMPLETED' ? 'bg-pylon-dark/5 text-pylon-dark/60' :
-                      selectedWorkloadDetail.status === 'QUEUED' ? 'bg-amber-50 text-amber-600' :
-                      'bg-red-50 text-red-600'
-                    }`}>
-                      {selectedWorkloadDetail.status}
-                    </span>
-                  </div>
-                  <div className="flex-1">
-                    <p className="text-xs text-pylon-dark/60 mb-2">Type</p>
-                    <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-pylon-light text-pylon-dark">
-                      {workloadTypeLabels[selectedWorkloadDetail.workload_type]}
-                    </span>
-                  </div>
-                  <div className="flex-1">
-                    <p className="text-xs text-pylon-dark/60 mb-2">Urgency</p>
-                    <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium ${
-                      selectedWorkloadDetail.urgency === 'CRITICAL' ? 'bg-red-100 text-red-700' :
-                      selectedWorkloadDetail.urgency === 'HIGH' ? 'bg-orange-100 text-orange-700' :
-                      selectedWorkloadDetail.urgency === 'MEDIUM' ? 'bg-amber-100 text-amber-700' :
-                      'bg-pylon-light text-pylon-dark/60'
-                    }`}>
-                      <AlertCircle className="w-3.5 h-3.5" />
-                      {selectedWorkloadDetail.urgency}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Resources */}
-                <div>
-                  <h4 className="text-sm font-semibold text-pylon-dark mb-3">Resources</h4>
-                  <div className="grid grid-cols-3 gap-4">
-                    <div className="bg-pylon-light rounded-lg p-3">
-                      <p className="text-xs text-pylon-dark/60 mb-1">CPU Cores</p>
-                      <p className="text-lg font-semibold text-pylon-dark">{selectedWorkloadDetail.required_cpu_cores}</p>
-                    </div>
-                    <div className="bg-pylon-light rounded-lg p-3">
-                      <p className="text-xs text-pylon-dark/60 mb-1">Memory</p>
-                      <p className="text-lg font-semibold text-pylon-dark">{selectedWorkloadDetail.required_memory_gb}GB</p>
-                    </div>
-                    <div className="bg-pylon-light rounded-lg p-3">
-                      <p className="text-xs text-pylon-dark/60 mb-1">GPU Minutes</p>
-                      <p className="text-lg font-semibold text-pylon-dark">{selectedWorkloadDetail.required_gpu_mins}</p>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Energy & Carbon */}
-                <div>
-                  <h4 className="text-sm font-semibold text-pylon-dark mb-3">Energy & Carbon</h4>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="border border-pylon-dark/10 rounded-lg p-4">
-                      <div className="flex items-center gap-2 mb-2">
-                        <Zap className="w-4 h-4 text-pylon-accent" />
-                        <p className="text-xs text-pylon-dark/60">Estimated Energy</p>
-                      </div>
-                      <p className="text-xl font-semibold text-pylon-dark">{selectedWorkloadDetail.estimated_energy_kwh} kWh</p>
-                    </div>
-                    <div className="border border-pylon-dark/10 rounded-lg p-4">
-                      <div className="flex items-center gap-2 mb-2">
-                        <Leaf className="w-4 h-4 text-pylon-accent" />
-                        <p className="text-xs text-pylon-dark/60">Carbon</p>
-                      </div>
-                      <p className={`text-xl font-semibold ${
-                        selectedWorkloadDetail.actual_carbon_gco2 && selectedWorkloadDetail.actual_carbon_gco2 < selectedWorkloadDetail.carbon_cap_gco2 * 0.8
-                          ? 'text-pylon-accent'
-                          : selectedWorkloadDetail.actual_carbon_gco2 && selectedWorkloadDetail.actual_carbon_gco2 > selectedWorkloadDetail.carbon_cap_gco2
-                          ? 'text-red-500'
-                          : 'text-pylon-dark'
-                      }`}>
-                        {selectedWorkloadDetail.actual_carbon_gco2 || selectedWorkloadDetail.carbon_cap_gco2}g CO₂
-                      </p>
-                      <p className="text-xs text-pylon-dark/60 mt-1">Cap: {selectedWorkloadDetail.carbon_cap_gco2}g</p>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Cost */}
-                <div>
-                  <h4 className="text-sm font-semibold text-pylon-dark mb-3">Cost</h4>
-                  <div className="border border-pylon-dark/10 rounded-lg p-4">
-                    <p className="text-xs text-pylon-dark/60 mb-2">
-                      {selectedWorkloadDetail.actual_cost_gbp ? 'Actual Cost' : 'Maximum Price'}
-                    </p>
-                    <p className="text-2xl font-semibold text-pylon-dark">
-                      £{selectedWorkloadDetail.actual_cost_gbp || selectedWorkloadDetail.max_price_gbp}
-                    </p>
-                  </div>
-                </div>
-
-                {/* Location */}
-                <div>
-                  <h4 className="text-sm font-semibold text-pylon-dark mb-3">Location</h4>
-                  <div className="border border-pylon-dark/10 rounded-lg p-4 flex items-start gap-3">
-                    <Server className="w-5 h-5 text-pylon-accent flex-shrink-0" />
-                    <div>
-                      <p className="text-sm font-medium text-pylon-dark">{selectedWorkloadDetail.host_dc}</p>
-                      <p className="text-xs text-pylon-dark/60">{selectedWorkloadDetail.region}</p>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Timing */}
-                <div>
-                  <h4 className="text-sm font-semibold text-pylon-dark mb-3">Timing</h4>
-                  <div className="space-y-2 text-sm">
-                    <div className="flex justify-between">
-                      <span className="text-pylon-dark/60">Created:</span>
-                      <span className="text-pylon-dark font-medium">
-                        {new Date(selectedWorkloadDetail.created_at).toLocaleString()}
-                      </span>
-                    </div>
-                    {selectedWorkloadDetail.started_at && (
-                      <div className="flex justify-between">
-                        <span className="text-pylon-dark/60">Started:</span>
-                        <span className="text-pylon-dark font-medium">
-                          {new Date(selectedWorkloadDetail.started_at).toLocaleString()}
-                        </span>
-                      </div>
-                    )}
-                    {selectedWorkloadDetail.completed_at && (
-                      <div className="flex justify-between">
-                        <span className="text-pylon-dark/60">Completed:</span>
-                        <span className="text-pylon-dark font-medium">
-                          {new Date(selectedWorkloadDetail.completed_at).toLocaleString()}
-                        </span>
-                      </div>
-                    )}
-                    {selectedWorkloadDetail.deadline && (
-                      <div className="flex justify-between">
-                        <span className="text-pylon-dark/60">Deadline:</span>
-                        <span className="text-pylon-dark font-medium">
-                          {new Date(selectedWorkloadDetail.deadline).toLocaleString()}
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex justify-end pt-4 border-t border-pylon-dark/10">
-                <button
-                  onClick={() => setSelectedWorkloadDetail(null)}
-                  className="px-4 py-2 text-sm font-medium text-white bg-pylon-dark rounded hover:bg-pylon-dark/90 transition-colors"
-                >
-                  Close
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+        <WorkloadDetailsModal
+          workload={selectedWorkloadDetail}
+          gridZoneMap={gridZoneMap}
+          onClose={() => setSelectedWorkloadDetail(null)}
+          onUpdate={loadWorkloads}
+        />
       )}
         </>
       )}
