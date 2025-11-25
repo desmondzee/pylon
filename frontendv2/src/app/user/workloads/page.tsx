@@ -207,10 +207,16 @@ export default function WorkloadsPage() {
       setCurrentUserId(userProfile.id)
 
       // Load workloads for this user with recommendation fields
+      // Only show workloads from last 30 days to avoid clutter
+      // (Older completed workloads are kept in DB for forecasting but hidden from UI)
+      const thirtyDaysAgo = new Date()
+      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
+
       const { data: workloadsData, error: workloadsError } = await supabase
         .from('compute_workloads')
         .select('*')
         .eq('user_id', userProfile.id)
+        .gte('submitted_at', thirtyDaysAgo.toISOString())
         .order('submitted_at', { ascending: false })
 
       if (workloadsError) {
