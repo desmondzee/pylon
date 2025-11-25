@@ -90,11 +90,16 @@ export default function SubmitWorkloadPage() {
         deadline: formData.deadline ? new Date(formData.deadline).toISOString() : null,
         is_deferrable: formData.is_deferrable,
         user_id: currentUser.id,
-        status: 'pending',
+        status: 'pending',  // Set to 'pending' so backend worker picks it up
         submitted_at: new Date().toISOString(),
+        // Store form data in metadata for the agent to process
+        metadata: {
+          user_request: formData,
+          agent_status: 'pending',  // Will be updated by backend worker
+        },
       }
 
-      // Insert into Supabase
+      // Insert into Supabase - backend worker will pick this up
       const { data: insertedWorkload, error: insertError } = await supabase
         .from('compute_workloads')
         .insert([workloadData])
@@ -108,8 +113,8 @@ export default function SubmitWorkloadPage() {
         return
       }
 
-      // Success! Redirect to workloads page
-      alert('Workload submitted successfully! Redirecting to your dashboard...')
+      // Success! Backend worker will process this
+      alert('Workload submitted successfully! The AI agent is analyzing your workload and will provide recommendations shortly.')
 
       // Reset form
       setFormData({

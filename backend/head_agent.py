@@ -337,17 +337,35 @@ def submit_task():
     2. Energy Agent: Finds optimal energy slot
     3. Head Agent: Orchestrates decision and Beckn protocol flow
     4. Beckn Client: Executes full protocol (discover -> select -> init -> confirm)
+    
+    Accepts:
+    - request: Natural language description of the task
+    - user_email: User email for tracking
+    - workload_id: Optional existing workload ID (if frontend already created it)
     """
     try:
         data = request.json
         user_request = data.get('request')
         user_email = data.get('user_email')  # Optional: user email for tracking
+        existing_workload_id = data.get('workload_id')  # Optional: if frontend already created workload
         
         if not user_request:
             return jsonify({"error": "No request provided"}), 400
-            
-        task_id = str(uuid.uuid4())
+        
+        # Use existing workload_id if provided, otherwise generate new one
+        task_id = existing_workload_id if existing_workload_id else str(uuid.uuid4())
         logger.info(f"Received task {task_id}: {user_request}")
+        
+        # If workload already exists, update status to 'queued'
+        if existing_workload_id and supabase:
+            try:
+                supabase.table("compute_workloads").update({
+                    "status": "queued",
+                    "updated_at": datetime.now(timezone.utc).isoformat()
+                }).eq("id", existing_workload_id).execute()
+                logger.info(f"Updated existing workload {existing_workload_id} to 'queued' status")
+            except Exception as e:
+                logger.warning(f"Could not update existing workload status: {e}")
         
         # Get or create user if email provided
         user_id = None
@@ -493,7 +511,7 @@ def submit_task():
             "priority": compute_analysis.get("priority", 50),
             "estimated_duration_hours": compute_analysis.get("estimated_duration_hours"),
             "estimated_energy_kwh": compute_analysis.get("estimated_energy_kwh"),
-            "status": "pending",
+            "status": "queued",  # Changed from "pending" to "queued" as requested
             "is_deferrable": compute_analysis.get("is_deferrable", False),
             "metadata": {
                 "user_request": user_request,
@@ -515,13 +533,19 @@ def submit_task():
         if user_id:
             workload_data["user_id"] = user_id
         
-        # Store workload in database FIRST
+        # Store workload in database FIRST (upsert if it already exists)
         if supabase:
             try:
-                supabase.table("compute_workloads").insert(workload_data).execute()
-                logger.info(f"Workload {task_id} stored in database (before Beckn flow)")
+                if existing_workload_id:
+                    # Update existing workload
+                    supabase.table("compute_workloads").update(workload_data).eq("id", task_id).execute()
+                    logger.info(f"Workload {task_id} updated in database (before Beckn flow)")
+                else:
+                    # Insert new workload
+                    supabase.table("compute_workloads").insert(workload_data).execute()
+                    logger.info(f"Workload {task_id} stored in database (before Beckn flow)")
             except Exception as db_err:
-                logger.error(f"DB Insert failed: {db_err}")
+                logger.error(f"DB Insert/Update failed: {db_err}")
                 # Continue anyway to return response to user
         
         # Step 6: Execute Beckn Protocol Flow (if decision is to proceed)
@@ -711,6 +735,80 @@ def index():
     </body>
     </html>
     """
+
+@app.route('/get_recommendations/<workload_id>', methods=['GET'])
+def get_recommendations(workload_id):
+    """
+    Endpoint for frontend to get structured recommendations for a workload.
+    Returns only what's necessary for the frontend display.
+    """
+    try:
+        if not supabase:
+            return jsonify({"error": "Database connection not available"}), 500
+        
+        # Get workload from database
+        workload_response = supabase.table("compute_workloads").select("*").eq("id", workload_id).execute()
+        
+        if not workload_response.data:
+            return jsonify({"error": "Workload not found"}), 404
+        
+        workload = workload_response.data[0]
+        metadata = workload.get("metadata", {})
+        
+        # Extract recommendations from metadata
+        compute_options = metadata.get("compute_options", {}).get("options", [])
+        energy_options = metadata.get("energy_options", {}).get("options", [])
+        head_decision = metadata.get("head_decision", {})
+        selected_option = metadata.get("selected_option", {})
+        decision_summary = metadata.get("decision_summary", "")
+        
+        # Structure response for frontend (only what's necessary)
+        recommendations = {
+            "workload_id": workload_id,
+            "status": workload.get("status", "queued"),
+            "decision_summary": decision_summary,
+            "selected_option": {
+                "source": selected_option.get("source"),  # "compute" or "energy"
+                "rank": selected_option.get("rank"),
+                "region": selected_option.get("option_data", {}).get("region") or 
+                         selected_option.get("option_data", {}).get("location") or 
+                         selected_option.get("option_data", {}).get("grid_area", "Unknown"),
+                "carbon_intensity": selected_option.get("option_data", {}).get("carbon_intensity"),
+                "renewable_mix": selected_option.get("option_data", {}).get("renewable_mix"),
+                "estimated_cost": selected_option.get("option_data", {}).get("estimated_cost"),
+                "time_window": selected_option.get("option_data", {}).get("time_window"),
+            },
+            "top_options": []
+        }
+        
+        # Add top 3 compute options (simplified)
+        for i, option in enumerate(compute_options[:3]):
+            recommendations["top_options"].append({
+                "source": "compute",
+                "rank": i + 1,
+                "region": option.get("region") or option.get("location") or option.get("asset_location", "Unknown"),
+                "asset_name": option.get("asset_name") or option.get("asset_id"),
+                "available_capacity": option.get("available_capacity"),
+                "estimated_cost": option.get("estimated_cost"),
+            })
+        
+        # Add top 3 energy options (simplified)
+        for i, option in enumerate(energy_options[:3]):
+            recommendations["top_options"].append({
+                "source": "energy",
+                "rank": i + 1,
+                "region": option.get("region") or option.get("grid_area") or option.get("location", "Unknown"),
+                "carbon_intensity": option.get("carbon_intensity"),
+                "renewable_mix": option.get("renewable_mix"),
+                "time_window": option.get("time_window"),
+                "estimated_cost": option.get("estimated_cost"),
+            })
+        
+        return jsonify(recommendations), 200
+        
+    except Exception as e:
+        logger.error(f"Error getting recommendations: {e}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
     port = int(os.getenv('PORT', 5001))

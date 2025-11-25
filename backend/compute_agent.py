@@ -92,8 +92,9 @@ class ComputeAgent:
                 logger.warning(f"Could not fetch compute windows: {e}")
             
             # Get existing workloads (to check conflicts)
+            # Specify which relationship to use (asset_id, not recommended_asset_id)
             try:
-                workloads = supabase.table("compute_workloads").select("*, compute_assets(*)").in_("status", ["pending", "scheduled", "running"]).execute()
+                workloads = supabase.table("compute_workloads").select("*, compute_assets!compute_workloads_asset_id_fkey(*)").in_("status", ["pending", "scheduled", "running"]).execute()
                 data["compute_workloads"] = workloads.data or []
             except Exception as e:
                 logger.warning(f"Could not fetch compute workloads: {e}")
