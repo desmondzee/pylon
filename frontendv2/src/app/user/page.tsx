@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { ArrowUpRight, ArrowDownRight, Zap, Leaf, Clock, Server, Plus, Upload, BarChart3, TrendingDown, DollarSign } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
+import StatusBadge from '@/components/common/StatusBadge'
 
 export default function UserDashboard() {
   const router = useRouter()
@@ -113,19 +114,19 @@ export default function UserDashboard() {
   }
 
   return (
-    <div className="space-y-8">
+    <div className="max-w-7xl mx-auto px-6 space-y-6">
       {/* Page header */}
       <div className="flex items-start justify-between">
         <div>
-          <h1 className="text-2xl font-semibold text-pylon-dark">Dashboard</h1>
-          <p className="text-sm text-pylon-dark/60 mt-1">Welcome back. Here's your compute overview.</p>
+          <h1 className="text-xl font-semibold text-[#121728]">Dashboard</h1>
+          <p className="text-sm text-gray-500 mt-1">Welcome back. Here's your compute overview.</p>
         </div>
         <div className="flex items-center gap-2">
-          <Link href="/user/analytics" className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-pylon-dark bg-white border border-pylon-dark/10 rounded hover:bg-pylon-light transition-colors">
+          <Link href="/user/analytics" className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-[#121728] bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">
             <BarChart3 className="w-4 h-4" />
             View Reports
           </Link>
-          <Link href="/user/submit" className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-pylon-dark rounded hover:bg-pylon-dark/90 transition-colors">
+          <Link href="/user/submit" className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-[#121728] rounded-lg hover:bg-[#1a1f2e] transition-colors">
             <Plus className="w-4 h-4" />
             New Workload
           </Link>
@@ -134,9 +135,9 @@ export default function UserDashboard() {
 
       {/* Loading state */}
       {loading && (
-        <div className="bg-white rounded-lg border border-pylon-dark/5 p-12 text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-pylon-accent mx-auto mb-4"></div>
-          <p className="text-sm text-pylon-dark/60">Loading dashboard...</p>
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-12 text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#121728] mx-auto mb-4"></div>
+          <p className="text-sm text-gray-500">Loading dashboard...</p>
         </div>
       )}
 
@@ -145,32 +146,32 @@ export default function UserDashboard() {
           {/* Stats grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
             {/* Active Workloads */}
-            <div className="bg-white rounded-lg p-6 border border-pylon-dark/5">
+            <div className="bg-white rounded-xl p-6 border border-gray-200 shadow-sm hover:shadow-md transition-shadow">
               <div className="flex items-start justify-between">
                 <div>
-                  <p className="text-sm text-pylon-dark/60">Active Workloads</p>
-                  <p className="text-3xl font-semibold text-pylon-dark mt-2">{stats.activeWorkloads}</p>
+                  <p className="text-sm text-gray-500">Active Workloads</p>
+                  <p className="text-3xl font-semibold text-[#121728] mt-2">{stats.activeWorkloads}</p>
                 </div>
                 <div className="w-10 h-10 rounded-lg bg-pylon-accent/10 flex items-center justify-center">
                   <Server className="w-5 h-5 text-pylon-accent" />
                 </div>
               </div>
               <div className="mt-4 flex items-center gap-1">
-                <span className="text-sm text-pylon-dark/40">Total: {stats.totalWorkloads}</span>
+                <span className="text-sm text-gray-500">Total: {stats.totalWorkloads}</span>
               </div>
             </div>
 
             {/* Carbon Saved */}
-            <div className="bg-white rounded-lg p-6 border border-pylon-dark/5">
+            <div className="bg-white rounded-xl p-6 border border-gray-200 shadow-sm hover:shadow-md transition-shadow">
               <div className="flex items-start justify-between">
                 <div>
-                  <p className="text-sm text-pylon-dark/60">Carbon Saved</p>
-                  <p className="text-3xl font-semibold text-pylon-dark mt-2">
+                  <p className="text-sm text-gray-500">Carbon Saved</p>
+                  <p className="text-3xl font-semibold text-[#121728] mt-2">
                     {stats.totalCarbonSaved > 1
                       ? `${(stats.totalCarbonSaved / 1000).toFixed(1)}t`
                       : `${(stats.totalCarbonSaved * 1000).toFixed(0)}g`}
                   </p>
-                  <p className="text-xs text-pylon-dark/40 mt-1">vs standard scheduling</p>
+                  <p className="text-xs text-gray-500 mt-1">vs standard scheduling</p>
                 </div>
                 <div className="w-10 h-10 rounded-lg bg-pylon-accent/10 flex items-center justify-center">
                   <Leaf className="w-5 h-5 text-pylon-accent" />
@@ -183,30 +184,30 @@ export default function UserDashboard() {
             </div>
 
             {/* Completed Workloads */}
-            <div className="bg-white rounded-lg p-6 border border-pylon-dark/5">
+            <div className="bg-white rounded-xl p-6 border border-gray-200 shadow-sm hover:shadow-md transition-shadow">
               <div className="flex items-start justify-between">
                 <div>
-                  <p className="text-sm text-pylon-dark/60">Completed</p>
-                  <p className="text-3xl font-semibold text-pylon-dark mt-2">{stats.completedWorkloads}</p>
+                  <p className="text-sm text-gray-500">Completed</p>
+                  <p className="text-3xl font-semibold text-[#121728] mt-2">{stats.completedWorkloads}</p>
                 </div>
                 <div className="w-10 h-10 rounded-lg bg-pylon-accent/10 flex items-center justify-center">
                   <Clock className="w-5 h-5 text-pylon-accent" />
                 </div>
               </div>
               <div className="mt-4 flex items-center gap-1">
-                <span className="text-sm text-pylon-dark/40">Success rate: 100%</span>
+                <span className="text-sm text-gray-500">Success rate: 100%</span>
               </div>
             </div>
 
             {/* Money Saved */}
-            <div className="bg-white rounded-lg p-6 border border-pylon-dark/5">
+            <div className="bg-white rounded-xl p-6 border border-gray-200 shadow-sm hover:shadow-md transition-shadow">
               <div className="flex items-start justify-between">
                 <div>
-                  <p className="text-sm text-pylon-dark/60">Money Saved</p>
-                  <p className="text-3xl font-semibold text-pylon-dark mt-2">
+                  <p className="text-sm text-gray-500">Money Saved</p>
+                  <p className="text-3xl font-semibold text-[#121728] mt-2">
                     £{stats.totalCostSaved.toFixed(0)}
                   </p>
-                  <p className="text-xs text-pylon-dark/40 mt-1">vs industry average</p>
+                  <p className="text-xs text-gray-500 mt-1">vs industry average</p>
                 </div>
                 <div className="w-10 h-10 rounded-lg bg-pylon-accent/10 flex items-center justify-center">
                   <DollarSign className="w-5 h-5 text-pylon-accent" />
@@ -222,9 +223,9 @@ export default function UserDashboard() {
       {/* Main content grid */}
       <div className="grid lg:grid-cols-3 gap-6">
         {/* Recent workloads */}
-        <div className="lg:col-span-2 bg-white rounded-lg border border-pylon-dark/5">
-          <div className="p-6 border-b border-pylon-dark/5 flex items-center justify-between">
-            <h2 className="text-lg font-semibold text-pylon-dark">Recent Workloads</h2>
+        <div className="lg:col-span-2 bg-white rounded-xl border border-gray-200 shadow-sm">
+          <div className="p-6 border-b border-gray-200 flex items-center justify-between">
+            <h2 className="text-lg font-medium text-[#121728]">Recent Workloads</h2>
             <Link href="/user/workloads" className="text-sm text-pylon-accent font-medium hover:underline">
               View all
             </Link>
@@ -232,40 +233,34 @@ export default function UserDashboard() {
           <div className="p-6">
             <table className="w-full">
               <thead>
-                <tr className="text-left text-xs font-medium text-pylon-dark/40 uppercase tracking-wider">
-                  <th className="pb-4">ID</th>
-                  <th className="pb-4">Name</th>
-                  <th className="pb-4">Region</th>
-                  <th className="pb-4">Status</th>
-                  <th className="pb-4">Carbon</th>
+                <tr className="text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50">
+                  <th className="pb-3 px-2">ID</th>
+                  <th className="pb-3 px-2">Name</th>
+                  <th className="pb-3 px-2">Region</th>
+                  <th className="pb-3 px-2">Status</th>
+                  <th className="pb-3 px-2">Carbon</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-pylon-dark/5">
+              <tbody className="divide-y divide-gray-200">
                 {recentWorkloads.length > 0 ? (
                   recentWorkloads.map((workload) => (
-                    <tr key={workload.id} className="text-sm">
-                      <td className="py-4 font-mono text-pylon-dark/60">{workload.id}</td>
-                      <td className="py-4 font-medium text-pylon-dark">{workload.name}</td>
-                      <td className="py-4 text-pylon-dark/60">{workload.region}</td>
-                      <td className="py-4">
-                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                          workload.status === 'Running' ? 'bg-pylon-accent/10 text-pylon-accent' :
-                          workload.status === 'Completed' ? 'bg-pylon-dark/5 text-pylon-dark/60' :
-                          'bg-amber-50 text-amber-600'
-                        }`}>
-                          {workload.status}
-                        </span>
+                    <tr key={workload.id} className="text-sm hover:bg-gray-50 transition-colors">
+                      <td className="py-4 px-2 font-mono text-gray-600">{workload.id}</td>
+                      <td className="py-4 px-2 font-medium text-[#121728] truncate max-w-[200px]" title={workload.name}>{workload.name}</td>
+                      <td className="py-4 px-2 text-gray-600">{workload.region}</td>
+                      <td className="py-4 px-2">
+                        <StatusBadge status={workload.status} />
                       </td>
-                      <td className="py-4">
+                      <td className="py-4 px-2">
                         <span className={`inline-flex items-center gap-1.5 text-xs font-medium ${
-                          workload.carbon === 'Low' ? 'text-pylon-accent' :
-                          workload.carbon === 'Medium' ? 'text-amber-500' :
-                          'text-red-500'
+                          workload.carbon === 'Low' ? 'text-green-600' :
+                          workload.carbon === 'Medium' ? 'text-amber-600' :
+                          'text-red-600'
                         }`}>
                           <span className={`w-1.5 h-1.5 rounded-full ${
-                            workload.carbon === 'Low' ? 'bg-pylon-accent' :
-                            workload.carbon === 'Medium' ? 'bg-amber-500' :
-                            'bg-red-500'
+                            workload.carbon === 'Low' ? 'bg-green-600' :
+                            workload.carbon === 'Medium' ? 'bg-amber-600' :
+                            'bg-red-600'
                           }`} />
                           {workload.carbon}
                         </span>
@@ -274,9 +269,9 @@ export default function UserDashboard() {
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={5} className="py-8 text-center">
-                      <p className="text-sm text-pylon-dark/60">No workloads yet.</p>
-                      <Link href="/user/submit" className="text-sm text-pylon-accent font-medium hover:underline mt-2 inline-block">
+                    <td colSpan={5} className="py-12 text-center">
+                      <p className="text-sm text-gray-500">No workloads yet.</p>
+                      <Link href="/user/submit" className="text-sm text-[#121728] font-medium hover:underline mt-2 inline-block">
                         Submit your first workload →
                       </Link>
                     </td>
@@ -288,11 +283,11 @@ export default function UserDashboard() {
         </div>
 
         {/* Carbon intensity chart placeholder */}
-        <div className="bg-white rounded-lg border border-pylon-dark/5">
-          <div className="p-6 border-b border-pylon-dark/5 flex items-center justify-between">
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
+          <div className="p-6 border-b border-gray-200 flex items-center justify-between">
             <div>
-              <h2 className="text-lg font-semibold text-pylon-dark">Carbon Intensity</h2>
-              <p className="text-xs text-pylon-dark/40 mt-1">Current UK grid status</p>
+              <h2 className="text-lg font-medium text-[#121728]">Carbon Intensity</h2>
+              <p className="text-xs text-gray-500 mt-1">Current UK grid status</p>
             </div>
             <Link href="/user/carbon-map" className="text-sm text-pylon-accent font-medium hover:underline">
               View map
@@ -310,8 +305,8 @@ export default function UserDashboard() {
               ].map((region) => (
                 <div key={region.region}>
                   <div className="flex items-center justify-between text-sm mb-1">
-                    <span className="text-pylon-dark/60">{region.region}</span>
-                    <span className="font-medium text-pylon-dark">{region.intensity}g</span>
+                    <span className="text-gray-600">{region.region}</span>
+                    <span className="font-medium text-[#121728]">{region.intensity}g</span>
                   </div>
                   <div className="h-2 bg-pylon-dark/5 rounded-full overflow-hidden">
                     <div
@@ -327,10 +322,10 @@ export default function UserDashboard() {
               ))}
             </div>
 
-            <div className="mt-6 pt-4 border-t border-pylon-dark/5">
+            <div className="mt-6 pt-4 border-t border-gray-200">
               <div className="flex items-center justify-between text-xs">
-                <span className="text-pylon-dark/40">Updated 2 mins ago</span>
-                <Link href="/user/carbon-map" className="text-pylon-accent font-medium hover:underline">View map</Link>
+                <span className="text-gray-500">Updated 2 mins ago</span>
+                <Link href="/user/carbon-map" className="text-[#121728] font-medium hover:underline">View map</Link>
               </div>
             </div>
           </div>
@@ -340,59 +335,59 @@ export default function UserDashboard() {
       {/* Quick Actions & Recommendations */}
       <div className="grid lg:grid-cols-2 gap-6">
         {/* Quick Actions */}
-        <div className="bg-white rounded-lg border border-pylon-dark/5 p-6">
-          <h2 className="text-lg font-semibold text-pylon-dark mb-4">Quick Actions</h2>
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
+          <h2 className="text-lg font-medium text-[#121728] mb-4">Quick Actions</h2>
           <div className="space-y-3">
-            <Link href="/user/submit" className="w-full flex items-center gap-4 p-4 bg-pylon-light rounded-lg hover:bg-pylon-accent/10 transition-colors group">
-              <div className="w-10 h-10 bg-white rounded-lg flex items-center justify-center group-hover:bg-pylon-accent/20 transition-colors">
-                <Plus className="w-5 h-5 text-pylon-dark group-hover:text-pylon-accent transition-colors" />
+            <Link href="/user/submit" className="w-full flex items-center gap-4 p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors group">
+              <div className="w-10 h-10 bg-white rounded-lg flex items-center justify-center group-hover:bg-[#121728]/5 transition-colors">
+                <Plus className="w-5 h-5 text-[#121728] group-hover:text-[#121728] transition-colors" />
               </div>
               <div className="flex-1 text-left">
-                <p className="font-medium text-pylon-dark">Submit New Workload</p>
-                <p className="text-xs text-pylon-dark/60">Deploy a new compute job</p>
+                <p className="font-medium text-[#121728]">Submit New Workload</p>
+                <p className="text-xs text-gray-500">Deploy a new compute job</p>
               </div>
-              <ArrowUpRight className="w-5 h-5 text-pylon-dark/40 group-hover:text-pylon-accent transition-colors" />
+              <ArrowUpRight className="w-5 h-5 text-gray-400 group-hover:text-[#121728] transition-colors" />
             </Link>
-            <Link href="/user/batch-upload" className="w-full flex items-center gap-4 p-4 bg-pylon-light rounded-lg hover:bg-pylon-accent/10 transition-colors group">
-              <div className="w-10 h-10 bg-white rounded-lg flex items-center justify-center group-hover:bg-pylon-accent/20 transition-colors">
-                <Upload className="w-5 h-5 text-pylon-dark group-hover:text-pylon-accent transition-colors" />
+            <Link href="/user/batch-upload" className="w-full flex items-center gap-4 p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors group">
+              <div className="w-10 h-10 bg-white rounded-lg flex items-center justify-center group-hover:bg-[#121728]/5 transition-colors">
+                <Upload className="w-5 h-5 text-[#121728] group-hover:text-[#121728] transition-colors" />
               </div>
               <div className="flex-1 text-left">
-                <p className="font-medium text-pylon-dark">Batch Upload</p>
-                <p className="text-xs text-pylon-dark/60">Upload multiple workloads</p>
+                <p className="font-medium text-[#121728]">Batch Upload</p>
+                <p className="text-xs text-gray-500">Upload multiple workloads</p>
               </div>
-              <ArrowUpRight className="w-5 h-5 text-pylon-dark/40 group-hover:text-pylon-accent transition-colors" />
+              <ArrowUpRight className="w-5 h-5 text-gray-400 group-hover:text-[#121728] transition-colors" />
             </Link>
-            <Link href="/user/analytics" className="w-full flex items-center gap-4 p-4 bg-pylon-light rounded-lg hover:bg-pylon-accent/10 transition-colors group">
-              <div className="w-10 h-10 bg-white rounded-lg flex items-center justify-center group-hover:bg-pylon-accent/20 transition-colors">
-                <BarChart3 className="w-5 h-5 text-pylon-dark group-hover:text-pylon-accent transition-colors" />
+            <Link href="/user/analytics" className="w-full flex items-center gap-4 p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors group">
+              <div className="w-10 h-10 bg-white rounded-lg flex items-center justify-center group-hover:bg-[#121728]/5 transition-colors">
+                <BarChart3 className="w-5 h-5 text-[#121728] group-hover:text-[#121728] transition-colors" />
               </div>
               <div className="flex-1 text-left">
-                <p className="font-medium text-pylon-dark">View Analytics</p>
-                <p className="text-xs text-pylon-dark/60">Detailed performance reports</p>
+                <p className="font-medium text-[#121728]">View Analytics</p>
+                <p className="text-xs text-gray-500">Detailed performance reports</p>
               </div>
-              <ArrowUpRight className="w-5 h-5 text-pylon-dark/40 group-hover:text-pylon-accent transition-colors" />
+              <ArrowUpRight className="w-5 h-5 text-gray-400 group-hover:text-[#121728] transition-colors" />
             </Link>
           </div>
         </div>
 
         {/* Optimization Recommendations */}
-        <div className="bg-white rounded-lg border border-pylon-dark/5 p-6">
-          <h2 className="text-lg font-semibold text-pylon-dark mb-4">Recommendations</h2>
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
+          <h2 className="text-lg font-medium text-[#121728] mb-4">Recommendations</h2>
           <div className="space-y-4">
-            <div className="p-4 bg-pylon-accent/5 border border-pylon-accent/20 rounded-lg">
+            <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
               <div className="flex items-start gap-3">
-                <div className="w-8 h-8 bg-pylon-accent/20 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5">
-                  <Leaf className="w-4 h-4 text-pylon-accent" />
+                <div className="w-8 h-8 bg-green-100 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5">
+                  <Leaf className="w-4 h-4 text-green-600" />
                 </div>
                 <div className="flex-1">
-                  <p className="font-medium text-pylon-dark text-sm mb-1">
+                  <p className="font-medium text-[#121728] text-sm mb-1">
                     Low carbon window available
                   </p>
-                  <p className="text-xs text-pylon-dark/60 mb-2">
+                  <p className="text-xs text-gray-600 mb-2">
                     Scotland grid intensity dropping to 35g CO2/kWh in 2 hours. Consider scheduling non-urgent workloads.
                   </p>
-                  <Link href="/user/submit" className="text-xs font-medium text-pylon-accent hover:underline">
+                  <Link href="/user/submit" className="text-xs font-medium text-green-600 hover:underline">
                     Schedule now →
                   </Link>
                 </div>
@@ -404,10 +399,10 @@ export default function UserDashboard() {
                   <Zap className="w-4 h-4 text-amber-600" />
                 </div>
                 <div className="flex-1">
-                  <p className="font-medium text-pylon-dark text-sm mb-1">
+                  <p className="font-medium text-[#121728] text-sm mb-1">
                     Cost optimization opportunity
                   </p>
-                  <p className="text-xs text-pylon-dark/60 mb-2">
+                  <p className="text-xs text-gray-600 mb-2">
                     Migrate WL-004 to UK-West to save 18% on energy costs while maintaining performance.
                   </p>
                   <Link href="/user/workloads" className="text-xs font-medium text-amber-600 hover:underline">
@@ -416,16 +411,16 @@ export default function UserDashboard() {
                 </div>
               </div>
             </div>
-            <div className="p-4 bg-pylon-light rounded-lg border border-pylon-dark/5">
+            <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
               <div className="flex items-start gap-3">
                 <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5">
-                  <Server className="w-4 h-4 text-pylon-dark/60" />
+                  <Server className="w-4 h-4 text-gray-600" />
                 </div>
                 <div className="flex-1">
-                  <p className="font-medium text-pylon-dark text-sm mb-1">
+                  <p className="font-medium text-[#121728] text-sm mb-1">
                     Capacity update
                   </p>
-                  <p className="text-xs text-pylon-dark/60">
+                  <p className="text-xs text-gray-600">
                     UK-North datacenter adding 400kW capacity next week. Reserve slots for critical workloads.
                   </p>
                 </div>

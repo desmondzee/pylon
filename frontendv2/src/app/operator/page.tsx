@@ -9,6 +9,8 @@ import { fetchAllWorkloads, calculateOrgStats, OperatorWorkload } from '@/lib/op
 import { fetchGridZones, formatGridZoneLabel } from '@/lib/grid-zones'
 import { GridZoneMap } from '@/lib/workload-types'
 import DataCenterMap from '@/components/operator/DataCenterMap'
+import DemoDataControls from '@/components/DemoDataControls'
+import StatusBadge from '@/components/common/StatusBadge'
 
 export default function OperatorDashboard() {
   const router = useRouter()
@@ -113,37 +115,42 @@ export default function OperatorDashboard() {
   }
 
   return (
-    <div className="space-y-8">
+    <div className="max-w-7xl mx-auto px-6 space-y-6">
       {/* Page header */}
       <div className="flex items-start justify-between">
         <div>
-          <h1 className="text-2xl font-semibold text-pylon-dark">Operator Dashboard</h1>
-          <p className="text-sm text-pylon-dark/60 mt-1">Administrative overview of all organization workloads and users.</p>
+          <h1 className="text-xl font-semibold text-[#121728]">Operator Dashboard</h1>
+          <p className="text-sm text-gray-500 mt-1">Administrative overview of all organization workloads and users.</p>
         </div>
         <div className="flex items-center gap-2">
           <button
             onClick={() => document.getElementById('data-center-map')?.scrollIntoView({ behavior: 'smooth' })}
-            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-pylon-dark bg-white border border-pylon-dark/10 rounded hover:bg-pylon-light transition-colors"
+            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-[#121728] bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
           >
             <MapPin className="w-4 h-4" />
             View Map
           </button>
-          <Link href="/operator/analytics" className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-pylon-dark bg-white border border-pylon-dark/10 rounded hover:bg-pylon-light transition-colors">
+          <Link href="/operator/analytics" className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-[#121728] bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">
             <BarChart3 className="w-4 h-4" />
             View Analytics
           </Link>
-          <Link href="/operator/workloads" className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-pylon-dark rounded hover:bg-pylon-dark/90 transition-colors">
+          <Link href="/operator/workloads" className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-[#121728] rounded-lg hover:bg-[#1a1f2e] transition-colors">
             <Server className="w-4 h-4" />
             Manage All Workloads
           </Link>
         </div>
       </div>
 
+      {/* Demo Data Controls */}
+      <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4">
+        <DemoDataControls onDataChange={loadWorkloads} />
+      </div>
+
       {/* Loading state */}
       {loading && (
-        <div className="bg-white rounded-lg border border-pylon-dark/5 p-12 text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-pylon-accent mx-auto mb-4"></div>
-          <p className="text-sm text-pylon-dark/60">Loading dashboard...</p>
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-12 text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#121728] mx-auto mb-4"></div>
+          <p className="text-sm text-gray-500">Loading dashboard...</p>
         </div>
       )}
 
@@ -162,36 +169,36 @@ export default function OperatorDashboard() {
         <>
           {/* Organization stats grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-            <div className="bg-white rounded-lg p-6 border border-pylon-dark/5">
+            <div className="bg-white rounded-xl p-6 border border-gray-200 shadow-sm hover:shadow-md transition-shadow">
               <div className="flex items-start justify-between">
                 <div>
-                  <p className="text-sm text-pylon-dark/60">Total Active Users</p>
-                  <p className="text-3xl font-semibold text-pylon-dark mt-2">{stats.uniqueUsers}</p>
+                  <p className="text-sm text-gray-500">Total Active Users</p>
+                  <p className="text-3xl font-semibold text-[#121728] mt-2">{stats.uniqueUsers}</p>
                 </div>
                 <div className="w-10 h-10 rounded-lg bg-pylon-accent/10 flex items-center justify-center">
                   <Users className="w-5 h-5 text-pylon-accent" />
                 </div>
               </div>
             </div>
-            <div className="bg-white rounded-lg p-6 border border-pylon-dark/5">
+            <div className="bg-white rounded-xl p-6 border border-gray-200 shadow-sm hover:shadow-md transition-shadow">
               <div className="flex items-start justify-between">
                 <div>
-                  <p className="text-sm text-pylon-dark/60">Organization Workloads</p>
-                  <p className="text-3xl font-semibold text-pylon-dark mt-2">{stats.totalWorkloads}</p>
+                  <p className="text-sm text-gray-500">Organization Workloads</p>
+                  <p className="text-3xl font-semibold text-[#121728] mt-2">{stats.totalWorkloads}</p>
                 </div>
                 <div className="w-10 h-10 rounded-lg bg-pylon-accent/10 flex items-center justify-center">
                   <Server className="w-5 h-5 text-pylon-accent" />
                 </div>
               </div>
               <div className="mt-4 flex items-center gap-1">
-                <span className="text-sm text-pylon-dark/40">Active: {stats.activeWorkloads}</span>
+                <span className="text-sm text-gray-500">Active: {stats.activeWorkloads}</span>
               </div>
             </div>
-            <div className="bg-white rounded-lg p-6 border border-pylon-dark/5">
+            <div className="bg-white rounded-xl p-6 border border-gray-200 shadow-sm hover:shadow-md transition-shadow">
               <div className="flex items-start justify-between">
                 <div>
-                  <p className="text-sm text-pylon-dark/60">Carbon Saved (Org)</p>
-                  <p className="text-3xl font-semibold text-pylon-dark mt-2">
+                  <p className="text-sm text-gray-500">Carbon Saved (Org)</p>
+                  <p className="text-3xl font-semibold text-[#121728] mt-2">
                     {stats.totalCarbonSaved > 1
                       ? `${stats.totalCarbonSaved.toFixed(1)}t`
                       : `${(stats.totalCarbonSaved * 1000).toFixed(0)}g`}
@@ -206,11 +213,11 @@ export default function OperatorDashboard() {
                 <span className="text-sm font-medium text-pylon-accent">30% reduction</span>
               </div>
             </div>
-            <div className="bg-white rounded-lg p-6 border border-pylon-dark/5">
+            <div className="bg-white rounded-xl p-6 border border-gray-200 shadow-sm hover:shadow-md transition-shadow">
               <div className="flex items-start justify-between">
                 <div>
-                  <p className="text-sm text-pylon-dark/60">Total Energy Cost</p>
-                  <p className="text-3xl font-semibold text-pylon-dark mt-2">
+                  <p className="text-sm text-gray-500">Total Energy Cost</p>
+                  <p className="text-3xl font-semibold text-[#121728] mt-2">
                     £{stats.totalCostSaved > 1000
                       ? `${(stats.totalCostSaved / 1000).toFixed(1)}k`
                       : stats.totalCostSaved.toFixed(0)}
@@ -230,11 +237,11 @@ export default function OperatorDashboard() {
           {/* Main content grid */}
           <div className="grid lg:grid-cols-3 gap-6">
         {/* Recent workloads from all users */}
-        <div className="lg:col-span-2 bg-white rounded-lg border border-pylon-dark/5">
-          <div className="p-6 border-b border-pylon-dark/5 flex items-center justify-between">
+        <div className="lg:col-span-2 bg-white rounded-xl border border-gray-200 shadow-sm">
+          <div className="p-6 border-b border-gray-200 flex items-center justify-between">
             <div>
-              <h2 className="text-lg font-semibold text-pylon-dark">Recent Workloads (All Users)</h2>
-              <p className="text-xs text-pylon-dark/40 mt-1">Monitor and manage workloads across the organization</p>
+              <h2 className="text-lg font-medium text-[#121728]">Recent Workloads (All Users)</h2>
+              <p className="text-xs text-gray-500 mt-1">Monitor and manage workloads across the organization</p>
             </div>
             <Link href="/operator/workloads" className="text-sm text-pylon-accent font-medium hover:underline">
               View all
@@ -243,27 +250,25 @@ export default function OperatorDashboard() {
           <div className="p-6">
             <table className="w-full">
               <thead>
-                <tr className="text-left text-xs font-medium text-pylon-dark/40 uppercase tracking-wider">
-                  <th className="pb-4">ID</th>
-                  <th className="pb-4">User</th>
-                  <th className="pb-4">Name</th>
-                  <th className="pb-4">Status</th>
-                  <th className="pb-4">Carbon</th>
-                  <th className="pb-4">Actions</th>
+                <tr className="text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50">
+                  <th className="pb-3 px-2">ID</th>
+                  <th className="pb-3 px-2">User</th>
+                  <th className="pb-3 px-2">Name</th>
+                  <th className="pb-3 px-2">Status</th>
+                  <th className="pb-3 px-2">Carbon</th>
+                  <th className="pb-3 px-2">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-pylon-dark/5">
+              <tbody className="divide-y divide-gray-200">
                 {workloads.slice(0, 10).map((workload) => {
                   const carbonLevel = getCarbonLevel(workload)
                   return (
-                    <tr key={workload.id} className="text-sm">
-                      <td className="py-4 font-mono text-pylon-dark/60">{workload.job_id || workload.id.substring(0, 8)}</td>
-                      <td className="py-4 text-pylon-dark/60 text-xs">{workload.user_email || 'Unknown'}</td>
-                      <td className="py-4 font-medium text-pylon-dark">{workload.workload_name}</td>
-                      <td className="py-4">
-                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusBadgeColor(workload.status)}`}>
-                          {workload.status}
-                        </span>
+                    <tr key={workload.id} className="text-sm hover:bg-gray-50 transition-colors">
+                      <td className="py-4 px-2 font-mono text-gray-600">{workload.job_id || workload.id.substring(0, 8)}</td>
+                      <td className="py-4 px-2 text-gray-600 text-xs">{workload.user_email || 'Unknown'}</td>
+                      <td className="py-4 px-2 font-medium text-[#121728] truncate max-w-[200px]" title={workload.workload_name}>{workload.workload_name}</td>
+                      <td className="py-4 px-2">
+                        <StatusBadge status={workload.status} />
                       </td>
                       <td className="py-4">
                         <span className={`inline-flex items-center gap-1.5 text-xs font-medium ${
@@ -308,9 +313,9 @@ export default function OperatorDashboard() {
         </div>
 
         {/* Organization alerts and actions */}
-        <div className="bg-white rounded-lg border border-pylon-dark/5">
-          <div className="p-6 border-b border-pylon-dark/5">
-            <h2 className="text-lg font-semibold text-pylon-dark">Organization Alerts</h2>
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
+          <div className="p-6 border-b border-gray-200">
+            <h2 className="text-lg font-medium text-[#121728]">Organization Alerts</h2>
           </div>
           <div className="p-6 space-y-4">
             {workloads.filter(w => !w.chosen_grid_zone && (w.recommended_grid_zone_id || w.recommended_2_grid_zone_id || w.recommended_3_grid_zone_id)).length > 0 && (
@@ -376,53 +381,53 @@ export default function OperatorDashboard() {
           <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
             <button
               onClick={() => document.getElementById('data-center-map')?.scrollIntoView({ behavior: 'smooth' })}
-              className="bg-white rounded-lg border border-pylon-dark/5 p-6 hover:border-pylon-accent transition-all group text-left"
+              className="bg-white rounded-xl border border-gray-200 shadow-sm p-6 hover:shadow-md hover:border-gray-300 transition-all group text-left"
             >
               <div className="flex items-center gap-4">
                 <div className="w-12 h-12 bg-pylon-accent/10 rounded-lg flex items-center justify-center group-hover:bg-pylon-accent/20 transition-colors">
                   <MapPin className="w-6 h-6 text-pylon-accent" />
                 </div>
                 <div className="flex-1">
-                  <h3 className="font-semibold text-pylon-dark mb-1">Data Center Map</h3>
-                  <p className="text-xs text-pylon-dark/60">View live geographical workload distribution</p>
+                  <h3 className="font-semibold text-[#121728] mb-1">Data Center Map</h3>
+                  <p className="text-xs text-gray-500">View live geographical workload distribution</p>
                 </div>
-                <ArrowUpRight className="w-5 h-5 text-pylon-dark/40 group-hover:text-pylon-accent transition-colors" />
+                <ArrowUpRight className="w-5 h-5 text-gray-400 group-hover:text-[#121728] transition-colors" />
               </div>
             </button>
-            <Link href="/operator/workloads" className="bg-white rounded-lg border border-pylon-dark/5 p-6 hover:border-pylon-accent transition-all group">
+            <Link href="/operator/workloads" className="bg-white rounded-xl border border-gray-200 shadow-sm p-6 hover:shadow-md hover:border-gray-300 transition-all group">
               <div className="flex items-center gap-4">
-                <div className="w-12 h-12 bg-pylon-accent/10 rounded-lg flex items-center justify-center group-hover:bg-pylon-accent/20 transition-colors">
-                  <Server className="w-6 h-6 text-pylon-accent" />
+                <div className="w-12 h-12 bg-gray-100 rounded-lg flex items-center justify-center group-hover:bg-[#121728]/5 transition-colors">
+                  <Server className="w-6 h-6 text-[#121728]" />
                 </div>
                 <div className="flex-1">
-                  <h3 className="font-semibold text-pylon-dark mb-1">Manage Workloads</h3>
-                  <p className="text-xs text-pylon-dark/60">View and intervene with all user workloads</p>
+                  <h3 className="font-semibold text-[#121728] mb-1">Manage Workloads</h3>
+                  <p className="text-xs text-gray-500">View and intervene with all user workloads</p>
                 </div>
-                <ArrowUpRight className="w-5 h-5 text-pylon-dark/40 group-hover:text-pylon-accent transition-colors" />
+                <ArrowUpRight className="w-5 h-5 text-gray-400 group-hover:text-[#121728] transition-colors" />
               </div>
             </Link>
-            <Link href="/operator/analytics" className="bg-white rounded-lg border border-pylon-dark/5 p-6 hover:border-pylon-accent transition-all group">
+            <Link href="/operator/analytics" className="bg-white rounded-xl border border-gray-200 shadow-sm p-6 hover:shadow-md hover:border-gray-300 transition-all group">
               <div className="flex items-center gap-4">
-                <div className="w-12 h-12 bg-pylon-accent/10 rounded-lg flex items-center justify-center group-hover:bg-pylon-accent/20 transition-colors">
-                  <BarChart3 className="w-6 h-6 text-pylon-accent" />
+                <div className="w-12 h-12 bg-gray-100 rounded-lg flex items-center justify-center group-hover:bg-[#121728]/5 transition-colors">
+                  <BarChart3 className="w-6 h-6 text-[#121728]" />
                 </div>
                 <div className="flex-1">
-                  <h3 className="font-semibold text-pylon-dark mb-1">Organization Analytics</h3>
-                  <p className="text-xs text-pylon-dark/60">View aggregated analytics across all users</p>
+                  <h3 className="font-semibold text-[#121728] mb-1">Organization Analytics</h3>
+                  <p className="text-xs text-gray-500">View aggregated analytics across all users</p>
                 </div>
-                <ArrowUpRight className="w-5 h-5 text-pylon-dark/40 group-hover:text-pylon-accent transition-colors" />
+                <ArrowUpRight className="w-5 h-5 text-gray-400 group-hover:text-[#121728] transition-colors" />
               </div>
             </Link>
-            <Link href="/operator/history" className="bg-white rounded-lg border border-pylon-dark/5 p-6 hover:border-pylon-accent transition-all group">
+            <Link href="/operator/history" className="bg-white rounded-xl border border-gray-200 shadow-sm p-6 hover:shadow-md hover:border-gray-300 transition-all group">
               <div className="flex items-center gap-4">
-                <div className="w-12 h-12 bg-pylon-accent/10 rounded-lg flex items-center justify-center group-hover:bg-pylon-accent/20 transition-colors">
-                  <Clock className="w-6 h-6 text-pylon-accent" />
+                <div className="w-12 h-12 bg-gray-100 rounded-lg flex items-center justify-center group-hover:bg-[#121728]/5 transition-colors">
+                  <Clock className="w-6 h-6 text-[#121728]" />
                 </div>
                 <div className="flex-1">
-                  <h3 className="font-semibold text-pylon-dark mb-1">View History</h3>
-                  <p className="text-xs text-pylon-dark/60">Review all users' workload history</p>
+                  <h3 className="font-semibold text-[#121728] mb-1">View History</h3>
+                  <p className="text-xs text-gray-500">Review all users' workload history</p>
                 </div>
-                <ArrowUpRight className="w-5 h-5 text-pylon-dark/40 group-hover:text-pylon-accent transition-colors" />
+                <ArrowUpRight className="w-5 h-5 text-gray-400 group-hover:text-[#121728] transition-colors" />
               </div>
             </Link>
           </div>
@@ -430,10 +435,10 @@ export default function OperatorDashboard() {
       )}
 
       {!loading && workloads.length === 0 && (
-        <div className="bg-white rounded-lg border border-pylon-dark/5 p-12 text-center">
-          <Server className="w-12 h-12 text-pylon-dark/20 mx-auto mb-4" />
-          <h3 className="text-lg font-semibold text-pylon-dark mb-2">No workloads found</h3>
-          <p className="text-sm text-pylon-dark/60">No workloads have been submitted yet.</p>
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-12 text-center">
+          <Server className="w-12 h-12 text-gray-300 mx-auto mb-4" />
+          <h3 className="text-lg font-semibold text-[#121728] mb-2">No workloads found</h3>
+          <p className="text-sm text-gray-500">No workloads have been submitted yet.</p>
         </div>
       )}
     </div>

@@ -34,15 +34,15 @@ export default function FeaturesSection() {
               <div className="w-14 h-14 rounded-xl bg-pylon-accent/10 flex items-center justify-center mb-6">
                 <feature.icon className="w-7 h-7 text-pylon-accent" />
               </div>
-              <h3 className="text-2xl font-semibold text-pylon-dark mb-4">
+              <h3 className="text-xl font-semibold text-[#121728] mb-4">
                 {feature.title}
               </h3>
-              <p className="text-base text-pylon-dark/60 leading-relaxed mb-6">
+              <p className="text-sm text-gray-700 leading-relaxed mb-6">
                 {feature.description}
               </p>
               <Link
                 href={feature.href}
-                className="inline-flex items-center text-sm font-medium text-pylon-dark group-hover:text-pylon-accent transition-colors"
+                className="inline-flex items-center text-sm font-medium text-[#121728] hover:text-gray-600 transition-colors"
               >
                 Learn more
                 <ArrowRight className="w-4 h-4 ml-2 group-hover:translate-x-1 transition-transform" />
