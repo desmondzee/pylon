@@ -8,6 +8,7 @@ import { createClient } from '@/lib/supabase/client'
 import { fetchAllWorkloads, calculateOrgStats, OperatorWorkload } from '@/lib/operator-workloads'
 import { fetchGridZones, formatGridZoneLabel } from '@/lib/grid-zones'
 import { GridZoneMap } from '@/lib/workload-types'
+import DataCenterMap from '@/components/operator/DataCenterMap'
 
 export default function OperatorDashboard() {
   const router = useRouter()
@@ -120,6 +121,13 @@ export default function OperatorDashboard() {
           <p className="text-sm text-pylon-dark/60 mt-1">Administrative overview of all organization workloads and users.</p>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            onClick={() => document.getElementById('data-center-map')?.scrollIntoView({ behavior: 'smooth' })}
+            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-pylon-dark bg-white border border-pylon-dark/10 rounded hover:bg-pylon-light transition-colors"
+          >
+            <MapPin className="w-4 h-4" />
+            View Map
+          </button>
           <Link href="/operator/analytics" className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-pylon-dark bg-white border border-pylon-dark/10 rounded hover:bg-pylon-light transition-colors">
             <BarChart3 className="w-4 h-4" />
             View Analytics
@@ -359,8 +367,28 @@ export default function OperatorDashboard() {
         </div>
           </div>
 
+          {/* Live Data Center Map */}
+          <div id="data-center-map">
+            <DataCenterMap />
+          </div>
+
           {/* Quick Actions */}
-          <div className="grid lg:grid-cols-3 gap-6">
+          <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
+            <button
+              onClick={() => document.getElementById('data-center-map')?.scrollIntoView({ behavior: 'smooth' })}
+              className="bg-white rounded-lg border border-pylon-dark/5 p-6 hover:border-pylon-accent transition-all group text-left"
+            >
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 bg-pylon-accent/10 rounded-lg flex items-center justify-center group-hover:bg-pylon-accent/20 transition-colors">
+                  <MapPin className="w-6 h-6 text-pylon-accent" />
+                </div>
+                <div className="flex-1">
+                  <h3 className="font-semibold text-pylon-dark mb-1">Data Center Map</h3>
+                  <p className="text-xs text-pylon-dark/60">View live geographical workload distribution</p>
+                </div>
+                <ArrowUpRight className="w-5 h-5 text-pylon-dark/40 group-hover:text-pylon-accent transition-colors" />
+              </div>
+            </button>
             <Link href="/operator/workloads" className="bg-white rounded-lg border border-pylon-dark/5 p-6 hover:border-pylon-accent transition-all group">
               <div className="flex items-center gap-4">
                 <div className="w-12 h-12 bg-pylon-accent/10 rounded-lg flex items-center justify-center group-hover:bg-pylon-accent/20 transition-colors">
