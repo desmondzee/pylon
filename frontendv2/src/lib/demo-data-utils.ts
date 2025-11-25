@@ -256,7 +256,7 @@ async function safeInsert(
       .insert(processedRows, { returning: 'minimal' })
 
     if (error) {
-      console.error(`[DemoData] Insert failed (attempt ${retryCount + 1}):`, error.message, error.code)
+      console.error(`[DemoData] Insert failed (attempt ${retryCount + 1}):`, error instanceof Error ? error.message : String(error), (error as any)?.code)
 
       // Handle specific error codes
       if (error.code === ERROR_CODES.UNIQUE_VIOLATION) {
