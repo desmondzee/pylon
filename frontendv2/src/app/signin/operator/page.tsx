@@ -5,22 +5,174 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import Image from 'next/image'
 import { ArrowLeft } from 'lucide-react'
+import { createClient } from '@/lib/supabase/client'
 
 export default function OperatorSignInPage() {
   const router = useRouter()
-  const [username, setUsername] = useState('')
+  const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  const [loading, setLoading] = useState(false)
+  const supabase = createClient()
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    setError(null)
+    setLoading(true)
     
-    if (username.trim() && password.trim()) {
-      // Store auth info in localStorage
-      localStorage.setItem('role', 'operator')
-      localStorage.setItem('username', username.trim())
+    try {
+      const { data, error: signInError } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password: password,
+      })
       
-      // Redirect to dashboard
-      router.push('/dashboard/operator')
+      if (signInError) {
+        setError(signInError.message)
+        setLoading(false)
+        return
+      }
+      
+      if (data.user) {
+        console.log('Auth successful, user:', data.user.email)
+        
+        // Check if user exists in users table
+        // Use auth_user_id for lookup since RLS might block email lookup
+        let { data: userProfile, error: profileError } = await supabase
+          .from('users')
+          .select('id, role, operator_id, user_email')
+          .eq('auth_user_id', data.user.id)
+          .single()
+        
+        // If not found by auth_user_id, try email
+        if (profileError || !userProfile) {
+          const { data: emailProfile, error: emailError } = await supabase
+            .from('users')
+            .select('id, role, operator_id, user_email')
+            .eq('user_email', email.trim())
+            .single()
+          
+          if (!emailError && emailProfile) {
+            userProfile = emailProfile
+            profileError = null
+          }
+        }
+        
+        console.log('Profile lookup result:', { userProfile, profileError })
+        
+        // If profile doesn't exist, try to create it automatically
+        if (profileError || !userProfile) {
+          console.log('Profile not found, creating new profile...')
+          // Get or create default operator
+          let { data: operators } = await supabase
+            .from('operators')
+            .select('id')
+            .eq('operator_name', 'Default Operator')
+            .limit(1)
+          
+          let operatorId = operators?.[0]?.id
+          
+          // Create default operator if it doesn't exist
+          if (!operatorId) {
+            const { data: newOperator } = await supabase
+              .from('operators')
+              .insert({
+                operator_name: 'Default Operator',
+                operator_type: 'enterprise',
+                is_active: true
+              })
+              .select('id')
+              .single()
+            
+            operatorId = newOperator?.id
+          }
+          
+          // Create user profile with operator role
+          const { data: newProfile, error: createError } = await supabase
+            .from('users')
+            .insert({
+              user_email: email.trim(),
+              user_name: data.user.user_metadata?.name || email.trim().split('@')[0],
+              auth_user_id: data.user.id,
+              operator_id: operatorId,
+              role: 'operator',  // Set as operator for operator signin
+              is_active: true
+            })
+            .select('id, role, operator_id')
+            .single()
+          
+          if (createError || !newProfile) {
+            setError('Failed to create user profile. Please contact your administrator.')
+            console.error('Profile creation error:', createError)
+            await supabase.auth.signOut()
+            setLoading(false)
+            return
+          }
+          
+          userProfile = newProfile
+        }
+        
+        // Check if user has operator role or is linked to an operator
+        // For now, we'll allow access if they have an operator_id
+        // You can customize this logic based on your requirements
+        if (userProfile.role !== 'operator' && !userProfile.operator_id) {
+          // Check if they're an operator by checking if they own an operator
+          const { data: operatorCheck } = await supabase
+            .from('operators')
+            .select('id')
+            .eq('id', userProfile.id)
+            .single()
+          
+          if (!operatorCheck) {
+            setError('Access denied. Operator role required.')
+            await supabase.auth.signOut()
+            setLoading(false)
+            return
+          }
+        }
+        
+        // Ensure session is saved before redirecting
+        const { data: sessionData, error: sessionError } = await supabase.auth.getSession()
+        if (sessionError) {
+          console.error('Session error:', sessionError)
+          setError('Failed to establish session. Please try again.')
+          setLoading(false)
+          return
+        }
+        
+        if (!sessionData.session) {
+          console.error('No session found after signin')
+          setError('Session not established. Please try again.')
+          setLoading(false)
+          return
+        }
+        
+        console.log('Session established:', sessionData.session.user.email)
+        
+        // Wait for auth state to be fully updated
+        // Listen for auth state change to ensure cookies are set
+        const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+          console.log('Auth state changed:', event, session?.user?.email)
+          if (event === 'SIGNED_IN' && session) {
+            subscription.unsubscribe()
+            console.log('Auth state confirmed, redirecting to /operator')
+            // Small delay to ensure cookies are written
+            setTimeout(() => {
+              window.location.replace('/operator')
+            }, 100)
+          }
+        })
+        
+        // Fallback: if auth state doesn't change within 1 second, redirect anyway
+        setTimeout(() => {
+          subscription.unsubscribe()
+          console.log('Fallback redirect to /operator')
+          window.location.replace('/operator')
+        }, 1000)
+      }
+    } catch (err) {
+      console.error('Signin error:', err)
+      setError(`An unexpected error occurred: ${err instanceof Error ? err.message : 'Please try again.'}`)
+      setLoading(false)
     }
   }
 
@@ -64,18 +216,25 @@ export default function OperatorSignInPage() {
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-6">
+              {error && (
+                <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-600">
+                  {error}
+                </div>
+              )}
+              
               <div>
-                <label htmlFor="username" className="block text-sm font-medium text-pylon-dark mb-2">
-                  Username
+                <label htmlFor="email" className="block text-sm font-medium text-pylon-dark mb-2">
+                  Email
                 </label>
                 <input
-                  type="text"
-                  id="username"
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
+                  type="email"
+                  id="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
                   className="w-full px-4 py-3 border border-pylon-dark/10 rounded-lg focus:outline-none focus:ring-2 focus:ring-pylon-accent focus:border-transparent transition-colors"
-                  placeholder="Enter your username"
+                  placeholder="Enter your email"
                   required
+                  disabled={loading}
                 />
               </div>
 
@@ -91,14 +250,16 @@ export default function OperatorSignInPage() {
                   className="w-full px-4 py-3 border border-pylon-dark/10 rounded-lg focus:outline-none focus:ring-2 focus:ring-pylon-accent focus:border-transparent transition-colors"
                   placeholder="Enter your password"
                   required
+                  disabled={loading}
                 />
               </div>
 
               <button
                 type="submit"
-                className="w-full px-6 py-3 bg-pylon-dark text-white font-medium rounded-lg hover:bg-pylon-dark/90 transition-colors"
+                disabled={loading}
+                className="w-full px-6 py-3 bg-pylon-dark text-white font-medium rounded-lg hover:bg-pylon-dark/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                Sign In
+                {loading ? 'Signing in...' : 'Sign In'}
               </button>
             </form>
           </div>

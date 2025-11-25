@@ -1,21 +1,29 @@
 'use client'
 
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { requireRole } from '@/lib/auth'
+import { requireRole, getCurrentUser } from '@/lib/auth'
 
 export default function UserDashboardPage() {
   const router = useRouter()
+  const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    // Enforce role-based access
-    requireRole('user', '/signin/user')
-    
-    // If authenticated, redirect to the actual user dashboard
-    const role = localStorage.getItem('role')
-    if (role === 'user') {
-      router.push('/user')
+    const checkAuth = async () => {
+      const user = await getCurrentUser()
+      if (!user) {
+        router.push('/signin/user')
+        return
+      }
+      
+      const hasRole = await requireRole('user', '/signin/user')
+      if (hasRole) {
+        router.push('/user')
+      }
+      setLoading(false)
     }
+    
+    checkAuth()
   }, [router])
 
   // Show loading state while checking/redirecting

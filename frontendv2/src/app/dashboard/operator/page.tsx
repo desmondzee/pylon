@@ -1,21 +1,29 @@
 'use client'
 
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { requireRole } from '@/lib/auth'
+import { requireRole, getCurrentUser } from '@/lib/auth'
 
 export default function OperatorDashboardPage() {
   const router = useRouter()
+  const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    // Enforce role-based access
-    requireRole('operator', '/signin/operator')
-    
-    // If authenticated, redirect to the actual operator dashboard
-    const role = localStorage.getItem('role')
-    if (role === 'operator') {
-      router.push('/operator')
+    const checkAuth = async () => {
+      const user = await getCurrentUser()
+      if (!user) {
+        router.push('/signin/operator')
+        return
+      }
+      
+      const hasRole = await requireRole('operator', '/signin/operator')
+      if (hasRole) {
+        router.push('/operator')
+      }
+      setLoading(false)
     }
+    
+    checkAuth()
   }, [router])
 
   // Show loading state while checking/redirecting
