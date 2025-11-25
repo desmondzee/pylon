@@ -246,7 +246,7 @@ export default function WorkloadsPage() {
     }
 
     loadWorkloads()
-  }, [router, supabase])
+  }, [])
 
   const filteredWorkloads = workloads.filter(w => {
     if (filter !== 'all' && w.status !== filter.toUpperCase()) return false
@@ -470,7 +470,7 @@ export default function WorkloadsPage() {
         {filteredWorkloads.map((workload) => (
           <div
             key={workload.id}
-            className="bg-white rounded-lg border border-pylon-dark/5 hover:border-pylon-accent/30 hover:shadow-md transition-all p-6 group"
+            className="block bg-white rounded-lg border border-pylon-dark/5 hover:border-pylon-accent/30 hover:shadow-md transition-all p-6 group"
           >
             <div className="flex items-start gap-4 mb-4">
               <input
@@ -486,12 +486,10 @@ export default function WorkloadsPage() {
                 className="flex-1 cursor-pointer"
                 onClick={() => setSelectedWorkloadDetail(workload)}
               >
-                <div className="flex items-start justify-between mb-4">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-3 mb-2">
-                      <h3 className="text-lg font-semibold text-pylon-dark group-hover:text-pylon-accent transition-colors">
-                        {workload.workload_name}
-                      </h3>
+                <div className="flex items-center gap-3 mb-2">
+                  <h3 className="text-lg font-semibold text-pylon-dark group-hover:text-pylon-accent transition-colors">
+                    {workload.workload_name}
+                  </h3>
                   <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
                     workload.status === 'RUNNING' ? 'bg-pylon-accent/10 text-pylon-accent' :
                     workload.status === 'COMPLETED' ? 'bg-pylon-dark/5 text-pylon-dark/60' :
@@ -614,6 +612,8 @@ export default function WorkloadsPage() {
               </Link>
             </div>
           )}
+        </>
+      )}
 
       {/* Delete confirmation modal */}
       {showDeleteConfirm && (
@@ -623,27 +623,20 @@ export default function WorkloadsPage() {
             <p className="text-sm text-pylon-dark/60 mb-6">
               Are you sure you want to delete {selectedWorkloads.size} workload{selectedWorkloads.size > 1 ? 's' : ''}? This action cannot be undone.
             </p>
-            <div className="flex justify-end gap-3">
+            <div className="flex gap-3 justify-end">
               <button
                 onClick={() => setShowDeleteConfirm(false)}
                 disabled={deleting}
-                className="px-4 py-2 text-sm font-medium text-pylon-dark bg-white border border-pylon-dark/10 rounded hover:bg-pylon-light transition-colors disabled:opacity-50"
+                className="px-4 py-2 text-sm font-medium text-pylon-dark bg-pylon-light rounded hover:bg-pylon-dark/10 transition-colors"
               >
                 Cancel
               </button>
               <button
                 onClick={handleDeleteSelected}
                 disabled={deleting}
-                className="px-4 py-2 text-sm font-medium text-white bg-red-600 rounded hover:bg-red-700 transition-colors disabled:opacity-50 flex items-center gap-2"
+                className="px-4 py-2 text-sm font-medium text-white bg-red-600 rounded hover:bg-red-700 transition-colors disabled:opacity-50"
               >
-                {deleting ? (
-                  <>
-                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                    Deleting...
-                  </>
-                ) : (
-                  'Delete'
-                )}
+                {deleting ? 'Deleting...' : 'Delete'}
               </button>
             </div>
           </div>
@@ -652,167 +645,149 @@ export default function WorkloadsPage() {
 
       {/* Workload detail modal */}
       {selectedWorkloadDetail && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-            <div className="p-6">
-              <div className="flex items-start justify-between mb-6">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 overflow-y-auto">
+          <div className="bg-white rounded-lg max-w-3xl w-full p-6 my-8">
+            <div className="flex items-start justify-between mb-6">
+              <div>
+                <h2 className="text-2xl font-semibold text-pylon-dark mb-2">
+                  {selectedWorkloadDetail.workload_name}
+                </h2>
+                <p className="text-sm text-pylon-dark/60 font-mono">{selectedWorkloadDetail.job_id}</p>
+              </div>
+              <button
+                onClick={() => setSelectedWorkloadDetail(null)}
+                className="text-pylon-dark/40 hover:text-pylon-dark transition-colors"
+              >
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+
+            <div className="space-y-6">
+              {/* Status and Type */}
+              <div className="grid md:grid-cols-2 gap-4">
                 <div>
-                  <h3 className="text-xl font-semibold text-pylon-dark mb-2">
-                    {selectedWorkloadDetail.workload_name}
-                  </h3>
-                  <p className="text-sm text-pylon-dark/60 font-mono">{selectedWorkloadDetail.job_id}</p>
+                  <p className="text-xs text-pylon-dark/60 mb-1">Status</p>
+                  <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${
+                    selectedWorkloadDetail.status === 'RUNNING' ? 'bg-pylon-accent/10 text-pylon-accent' :
+                    selectedWorkloadDetail.status === 'COMPLETED' ? 'bg-pylon-dark/5 text-pylon-dark/60' :
+                    selectedWorkloadDetail.status === 'QUEUED' ? 'bg-amber-50 text-amber-600' :
+                    'bg-red-50 text-red-600'
+                  }`}>
+                    {selectedWorkloadDetail.status}
+                  </span>
                 </div>
-                <button
-                  onClick={() => setSelectedWorkloadDetail(null)}
-                  className="p-2 text-pylon-dark/40 hover:text-pylon-dark hover:bg-pylon-light rounded transition-colors"
-                >
-                  <X className="w-5 h-5" />
-                </button>
+                <div>
+                  <p className="text-xs text-pylon-dark/60 mb-1">Workload Type</p>
+                  <p className="text-sm font-medium text-pylon-dark">
+                    {workloadTypeLabels[selectedWorkloadDetail.workload_type] || selectedWorkloadDetail.workload_type}
+                  </p>
+                </div>
               </div>
 
-              <div className="space-y-6">
-                {/* Status and Type */}
-                <div className="flex gap-4">
-                  <div className="flex-1">
-                    <p className="text-xs text-pylon-dark/60 mb-2">Status</p>
-                    <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${
-                      selectedWorkloadDetail.status === 'RUNNING' ? 'bg-pylon-accent/10 text-pylon-accent' :
-                      selectedWorkloadDetail.status === 'COMPLETED' ? 'bg-pylon-dark/5 text-pylon-dark/60' :
-                      selectedWorkloadDetail.status === 'QUEUED' ? 'bg-amber-50 text-amber-600' :
-                      'bg-red-50 text-red-600'
-                    }`}>
-                      {selectedWorkloadDetail.status}
-                    </span>
+              {/* Resource Requirements */}
+              <div>
+                <h3 className="text-sm font-semibold text-pylon-dark mb-3">Resource Requirements</h3>
+                <div className="grid md:grid-cols-3 gap-4">
+                  <div className="bg-pylon-light p-3 rounded">
+                    <p className="text-xs text-pylon-dark/60 mb-1">CPU Cores</p>
+                    <p className="text-lg font-semibold text-pylon-dark">{selectedWorkloadDetail.required_cpu_cores}</p>
                   </div>
-                  <div className="flex-1">
-                    <p className="text-xs text-pylon-dark/60 mb-2">Type</p>
-                    <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-pylon-light text-pylon-dark">
-                      {workloadTypeLabels[selectedWorkloadDetail.workload_type]}
-                    </span>
+                  <div className="bg-pylon-light p-3 rounded">
+                    <p className="text-xs text-pylon-dark/60 mb-1">Memory</p>
+                    <p className="text-lg font-semibold text-pylon-dark">{selectedWorkloadDetail.required_memory_gb} GB</p>
                   </div>
-                  <div className="flex-1">
-                    <p className="text-xs text-pylon-dark/60 mb-2">Urgency</p>
-                    <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium ${
+                  <div className="bg-pylon-light p-3 rounded">
+                    <p className="text-xs text-pylon-dark/60 mb-1">GPU Minutes</p>
+                    <p className="text-lg font-semibold text-pylon-dark">{selectedWorkloadDetail.required_gpu_mins}</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Carbon and Cost */}
+              <div>
+                <h3 className="text-sm font-semibold text-pylon-dark mb-3">Carbon & Cost</h3>
+                <div className="grid md:grid-cols-3 gap-4">
+                  <div className="bg-pylon-light p-3 rounded">
+                    <p className="text-xs text-pylon-dark/60 mb-1">Carbon Emissions</p>
+                    <p className="text-lg font-semibold text-pylon-dark">
+                      {selectedWorkloadDetail.actual_carbon_gco2 || selectedWorkloadDetail.carbon_cap_gco2}g CO₂
+                    </p>
+                    <p className="text-xs text-pylon-dark/60">Cap: {selectedWorkloadDetail.carbon_cap_gco2}g</p>
+                  </div>
+                  <div className="bg-pylon-light p-3 rounded">
+                    <p className="text-xs text-pylon-dark/60 mb-1">Cost</p>
+                    <p className="text-lg font-semibold text-pylon-dark">
+                      £{selectedWorkloadDetail.actual_cost_gbp || selectedWorkloadDetail.max_price_gbp}
+                    </p>
+                    <p className="text-xs text-pylon-dark/60">Max: £{selectedWorkloadDetail.max_price_gbp}</p>
+                  </div>
+                  <div className="bg-pylon-light p-3 rounded">
+                    <p className="text-xs text-pylon-dark/60 mb-1">Energy</p>
+                    <p className="text-lg font-semibold text-pylon-dark">
+                      {selectedWorkloadDetail.estimated_energy_kwh} kWh
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Scheduling */}
+              <div>
+                <h3 className="text-sm font-semibold text-pylon-dark mb-3">Scheduling</h3>
+                <div className="grid md:grid-cols-2 gap-4">
+                  <div className="bg-pylon-light p-3 rounded">
+                    <p className="text-xs text-pylon-dark/60 mb-1">Urgency</p>
+                    <div className={`inline-flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium ${
                       selectedWorkloadDetail.urgency === 'CRITICAL' ? 'bg-red-100 text-red-700' :
                       selectedWorkloadDetail.urgency === 'HIGH' ? 'bg-orange-100 text-orange-700' :
                       selectedWorkloadDetail.urgency === 'MEDIUM' ? 'bg-amber-100 text-amber-700' :
                       'bg-pylon-light text-pylon-dark/60'
                     }`}>
-                      <AlertCircle className="w-3.5 h-3.5" />
                       {selectedWorkloadDetail.urgency}
+                    </div>
+                  </div>
+                  <div className="bg-pylon-light p-3 rounded">
+                    <p className="text-xs text-pylon-dark/60 mb-1">Deferral Window</p>
+                    <p className="text-sm font-medium text-pylon-dark">{selectedWorkloadDetail.deferral_window_mins} minutes</p>
+                  </div>
+                  <div className="bg-pylon-light p-3 rounded">
+                    <p className="text-xs text-pylon-dark/60 mb-1">Data Center</p>
+                    <p className="text-sm font-medium text-pylon-dark">{selectedWorkloadDetail.host_dc}</p>
+                  </div>
+                  <div className="bg-pylon-light p-3 rounded">
+                    <p className="text-xs text-pylon-dark/60 mb-1">Deadline</p>
+                    <p className="text-sm font-medium text-pylon-dark">
+                      {selectedWorkloadDetail.deadline ? new Date(selectedWorkloadDetail.deadline).toLocaleString() : 'Not set'}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Timestamps */}
+              <div>
+                <h3 className="text-sm font-semibold text-pylon-dark mb-3">Timeline</h3>
+                <div className="space-y-2 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-pylon-dark/60">Created:</span>
+                    <span className="font-medium text-pylon-dark">
+                      {new Date(selectedWorkloadDetail.created_at).toLocaleString()}
                     </span>
                   </div>
-                </div>
-
-                {/* Resources */}
-                <div>
-                  <h4 className="text-sm font-semibold text-pylon-dark mb-3">Resources</h4>
-                  <div className="grid grid-cols-3 gap-4">
-                    <div className="bg-pylon-light rounded-lg p-3">
-                      <p className="text-xs text-pylon-dark/60 mb-1">CPU Cores</p>
-                      <p className="text-lg font-semibold text-pylon-dark">{selectedWorkloadDetail.required_cpu_cores}</p>
-                    </div>
-                    <div className="bg-pylon-light rounded-lg p-3">
-                      <p className="text-xs text-pylon-dark/60 mb-1">Memory</p>
-                      <p className="text-lg font-semibold text-pylon-dark">{selectedWorkloadDetail.required_memory_gb}GB</p>
-                    </div>
-                    <div className="bg-pylon-light rounded-lg p-3">
-                      <p className="text-xs text-pylon-dark/60 mb-1">GPU Minutes</p>
-                      <p className="text-lg font-semibold text-pylon-dark">{selectedWorkloadDetail.required_gpu_mins}</p>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Energy & Carbon */}
-                <div>
-                  <h4 className="text-sm font-semibold text-pylon-dark mb-3">Energy & Carbon</h4>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="border border-pylon-dark/10 rounded-lg p-4">
-                      <div className="flex items-center gap-2 mb-2">
-                        <Zap className="w-4 h-4 text-pylon-accent" />
-                        <p className="text-xs text-pylon-dark/60">Estimated Energy</p>
-                      </div>
-                      <p className="text-xl font-semibold text-pylon-dark">{selectedWorkloadDetail.estimated_energy_kwh} kWh</p>
-                    </div>
-                    <div className="border border-pylon-dark/10 rounded-lg p-4">
-                      <div className="flex items-center gap-2 mb-2">
-                        <Leaf className="w-4 h-4 text-pylon-accent" />
-                        <p className="text-xs text-pylon-dark/60">Carbon</p>
-                      </div>
-                      <p className={`text-xl font-semibold ${
-                        selectedWorkloadDetail.actual_carbon_gco2 && selectedWorkloadDetail.actual_carbon_gco2 < selectedWorkloadDetail.carbon_cap_gco2 * 0.8
-                          ? 'text-pylon-accent'
-                          : selectedWorkloadDetail.actual_carbon_gco2 && selectedWorkloadDetail.actual_carbon_gco2 > selectedWorkloadDetail.carbon_cap_gco2
-                          ? 'text-red-500'
-                          : 'text-pylon-dark'
-                      }`}>
-                        {selectedWorkloadDetail.actual_carbon_gco2 || selectedWorkloadDetail.carbon_cap_gco2}g CO₂
-                      </p>
-                      <p className="text-xs text-pylon-dark/60 mt-1">Cap: {selectedWorkloadDetail.carbon_cap_gco2}g</p>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Cost */}
-                <div>
-                  <h4 className="text-sm font-semibold text-pylon-dark mb-3">Cost</h4>
-                  <div className="border border-pylon-dark/10 rounded-lg p-4">
-                    <p className="text-xs text-pylon-dark/60 mb-2">
-                      {selectedWorkloadDetail.actual_cost_gbp ? 'Actual Cost' : 'Maximum Price'}
-                    </p>
-                    <p className="text-2xl font-semibold text-pylon-dark">
-                      £{selectedWorkloadDetail.actual_cost_gbp || selectedWorkloadDetail.max_price_gbp}
-                    </p>
-                  </div>
-                </div>
-
-                {/* Location */}
-                <div>
-                  <h4 className="text-sm font-semibold text-pylon-dark mb-3">Location</h4>
-                  <div className="border border-pylon-dark/10 rounded-lg p-4 flex items-start gap-3">
-                    <Server className="w-5 h-5 text-pylon-accent flex-shrink-0" />
-                    <div>
-                      <p className="text-sm font-medium text-pylon-dark">{selectedWorkloadDetail.host_dc}</p>
-                      <p className="text-xs text-pylon-dark/60">{selectedWorkloadDetail.region}</p>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Timing */}
-                <div>
-                  <h4 className="text-sm font-semibold text-pylon-dark mb-3">Timing</h4>
-                  <div className="space-y-2 text-sm">
+                  {selectedWorkloadDetail.started_at && (
                     <div className="flex justify-between">
-                      <span className="text-pylon-dark/60">Created:</span>
-                      <span className="text-pylon-dark font-medium">
-                        {new Date(selectedWorkloadDetail.created_at).toLocaleString()}
+                      <span className="text-pylon-dark/60">Started:</span>
+                      <span className="font-medium text-pylon-dark">
+                        {new Date(selectedWorkloadDetail.started_at).toLocaleString()}
                       </span>
                     </div>
-                    {selectedWorkloadDetail.started_at && (
-                      <div className="flex justify-between">
-                        <span className="text-pylon-dark/60">Started:</span>
-                        <span className="text-pylon-dark font-medium">
-                          {new Date(selectedWorkloadDetail.started_at).toLocaleString()}
-                        </span>
-                      </div>
-                    )}
-                    {selectedWorkloadDetail.completed_at && (
-                      <div className="flex justify-between">
-                        <span className="text-pylon-dark/60">Completed:</span>
-                        <span className="text-pylon-dark font-medium">
-                          {new Date(selectedWorkloadDetail.completed_at).toLocaleString()}
-                        </span>
-                      </div>
-                    )}
-                    {selectedWorkloadDetail.deadline && (
-                      <div className="flex justify-between">
-                        <span className="text-pylon-dark/60">Deadline:</span>
-                        <span className="text-pylon-dark font-medium">
-                          {new Date(selectedWorkloadDetail.deadline).toLocaleString()}
-                        </span>
-                      </div>
-                    )}
-                  </div>
+                  )}
+                  {selectedWorkloadDetail.completed_at && (
+                    <div className="flex justify-between">
+                      <span className="text-pylon-dark/60">Completed:</span>
+                      <span className="font-medium text-pylon-dark">
+                        {new Date(selectedWorkloadDetail.completed_at).toLocaleString()}
+                      </span>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -827,8 +802,6 @@ export default function WorkloadsPage() {
             </div>
           </div>
         </div>
-      )}
-        </>
       )}
     </div>
   )

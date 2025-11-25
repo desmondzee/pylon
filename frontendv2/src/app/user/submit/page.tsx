@@ -150,17 +150,46 @@ export default function SubmitWorkloadPage() {
     setEstimatedCost(baseCost + carbonCost)
   }
 
+  const quickFill = () => {
+    const sampleData = {
+      workload_name: 'ML Training - ResNet50 Model',
+      workload_type: 'TRAINING_RUN',
+      urgency: 'HIGH',
+      host_dc: 'UK-West-01',
+      required_gpu_mins: '480',
+      required_cpu_cores: '16',
+      required_memory_gb: '64',
+      estimated_energy_kwh: '12.5',
+      carbon_cap_gco2: '450',
+      max_price_gbp: '25.50',
+      deferral_window_mins: '120',
+      deadline: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().slice(0, 16), // Tomorrow
+      is_deferrable: true,
+    }
+    setFormData(sampleData)
+    calculateEstimate()
+  }
+
   return (
     <div className="space-y-6 max-w-4xl">
       {/* Page header */}
-      <div>
-        <div className="flex items-center gap-2 text-sm text-pylon-dark/60 mb-2">
-          <Link href="/user" className="hover:text-pylon-dark">Dashboard</Link>
-          <ChevronRight className="w-4 h-4" />
-          <span className="text-pylon-dark">Submit Workload</span>
+      <div className="flex items-start justify-between">
+        <div>
+          <div className="flex items-center gap-2 text-sm text-pylon-dark/60 mb-2">
+            <Link href="/user" className="hover:text-pylon-dark">Dashboard</Link>
+            <ChevronRight className="w-4 h-4" />
+            <span className="text-pylon-dark">Submit Workload</span>
+          </div>
+          <h1 className="text-2xl font-semibold text-pylon-dark">Submit New Workload</h1>
+          <p className="text-sm text-pylon-dark/60 mt-1">Deploy a new compute job with carbon-aware scheduling</p>
         </div>
-        <h1 className="text-2xl font-semibold text-pylon-dark">Submit New Workload</h1>
-        <p className="text-sm text-pylon-dark/60 mt-1">Deploy a new compute job with carbon-aware scheduling</p>
+        <button
+          type="button"
+          onClick={quickFill}
+          className="px-4 py-2 text-sm font-medium text-pylon-dark bg-amber-50 border border-amber-200 rounded hover:bg-amber-100 transition-colors"
+        >
+          Quick Fill (Testing)
+        </button>
       </div>
 
       {/* Error banner */}
