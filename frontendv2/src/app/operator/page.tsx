@@ -99,6 +99,118 @@ export default function OperatorDashboard() {
     return 'bg-red-50 text-red-600'
   }
 
+  const handlePause = async (workloadId: string) => {
+    if (actionLoading) return
+    
+    setActionLoading(workloadId)
+    try {
+      const profile = await getUserProfile()
+      if (!profile) {
+        alert('Unable to get operator information')
+        return
+      }
+      
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5001'}/api/workloads/${workloadId}/pause`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          operator_id: profile.operatorId || profile.id,
+          operator_name: profile.name || profile.email || 'Operator'
+        })
+      })
+      
+      const data = await response.json()
+      
+      if (response.ok && data.success) {
+        await loadWorkloads()
+      } else {
+        alert(data.error || 'Failed to pause workload')
+      }
+    } catch (error) {
+      console.error('Error pausing workload:', error)
+      alert('Failed to pause workload. Please try again.')
+    } finally {
+      setActionLoading(null)
+    }
+  }
+
+  const handleResume = async (workloadId: string) => {
+    if (actionLoading) return
+    
+    setActionLoading(workloadId)
+    try {
+      const profile = await getUserProfile()
+      if (!profile) {
+        alert('Unable to get operator information')
+        return
+      }
+      
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5001'}/api/workloads/${workloadId}/resume`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          operator_id: profile.operatorId || profile.id,
+          operator_name: profile.name || profile.email || 'Operator'
+        })
+      })
+      
+      const data = await response.json()
+      
+      if (response.ok && data.success) {
+        await loadWorkloads()
+      } else {
+        alert(data.error || 'Failed to resume workload')
+      }
+    } catch (error) {
+      console.error('Error resuming workload:', error)
+      alert('Failed to resume workload. Please try again.')
+    } finally {
+      setActionLoading(null)
+    }
+  }
+
+  const handleCancel = async (workloadId: string) => {
+    if (actionLoading) return
+    if (!confirm('Are you sure you want to cancel this workload?')) return
+    
+    setActionLoading(workloadId)
+    try {
+      const profile = await getUserProfile()
+      if (!profile) {
+        alert('Unable to get operator information')
+        return
+      }
+      
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5001'}/api/workloads/${workloadId}/cancel`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          operator_id: profile.operatorId || profile.id,
+          operator_name: profile.name || profile.email || 'Operator'
+        })
+      })
+      
+      const data = await response.json()
+      
+      if (response.ok && data.success) {
+        await loadWorkloads()
+      } else {
+        alert(data.error || 'Failed to cancel workload')
+      }
+    } catch (error) {
+      console.error('Error cancelling workload:', error)
+      alert('Failed to cancel workload. Please try again.')
+    } finally {
+      setActionLoading(null)
+    }
+  }
+
   const getCarbonLevel = (workload: OperatorWorkload): 'Low' | 'Medium' | 'High' => {
     if (!workload.actual_carbon_gco2 || !workload.carbon_cap_gco2) return 'Medium'
     const ratio = workload.actual_carbon_gco2 / workload.carbon_cap_gco2

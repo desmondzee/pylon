@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import Image from 'next/image'
 import { usePathname } from 'next/navigation'
-import { Home, BarChart2, History, HelpCircle, Settings, CreditCard, ChevronRight } from 'lucide-react'
+import { Home, BarChart2, History, HelpCircle, Settings, CreditCard, ChevronRight, Bot } from 'lucide-react'
 import clsx from 'clsx'
 
 // Sidebar styling constants
@@ -14,6 +14,7 @@ const SIDEBAR_HOVER = 'hover:bg-[#1f2433]'
 
 const mainNavItems = [
   { icon: Home, label: 'Home', href: '/user' },
+  { icon: Bot, label: 'AI Assistant', href: '/user/assistant' },
   { icon: BarChart2, label: 'Analytics', href: '/user/analytics' },
   { icon: History, label: 'History', href: '/user/history' },
   { icon: CreditCard, label: 'Billing', href: '/user/billing' },

@@ -360,7 +360,7 @@ export default function OperatorAnalyticsPage() {
         ) : (
           <>
             <div className="h-64 flex items-end justify-between gap-1 overflow-hidden">
-              {data.chartData.map((value, idx) => {
+              {data.chartData.map((value: number, idx: number) => {
                 const maxValue = Math.max(...data.chartData)
                 // Ensure minimum 2% height for visibility, even if value is 0
                 const normalizedHeight = value === 0 ? 2 : Math.max(2, Math.min((value / maxValue) * 100, 100))
@@ -426,7 +426,8 @@ export default function OperatorAnalyticsPage() {
                 .sort(([, a], [, b]) => (b as number) - (a as number))
                 .map(([type, count], idx) => {
                   const total = Object.values(analyticsData.workloadsByType).reduce((sum: number, c) => sum + (c as number), 0)
-                  const percent = total > 0 ? Math.round(((count as number) / total) * 100) : 0
+                  const countNum = count as number
+                  const percent = total > 0 ? Math.round((countNum / total) * 100) : 0
                   const colors = ['bg-pylon-accent', 'bg-amber-400', 'bg-blue-400', 'bg-purple-400']
                   const typeLabels: Record<string, string> = {
                     'TRAINING_RUN': 'Training Runs',
@@ -439,7 +440,7 @@ export default function OperatorAnalyticsPage() {
                     <div key={type}>
                       <div className="flex items-center justify-between text-sm mb-2">
                         <span className="text-pylon-dark/70">{typeLabels[type] || type}</span>
-                        <span className="font-medium text-pylon-dark">{count} ({percent}%)</span>
+                        <span className="font-medium text-pylon-dark">{countNum} ({percent}%)</span>
                       </div>
                       <div className="h-2 bg-pylon-dark/5 rounded-full overflow-hidden">
                         <div className={`h-full ${colors[idx % colors.length]} rounded-full`} style={{ width: `${percent}%` }} />

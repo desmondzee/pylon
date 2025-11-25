@@ -247,8 +247,8 @@ export default function WorkloadsPage() {
         deferral_window_mins: w.deferral_window_mins,
         deadline: w.deadline,
         created_at: w.submitted_at || w.created_at,
-        started_at: w.actual_start,
-        completed_at: w.actual_end,
+        started_at: (w as any).actual_start || w.started_at || null,
+        completed_at: (w as any).actual_end || null,
         // Progress will be calculated dynamically based on elapsed time
         progress: 0, // Will be calculated in component
         runtime_hours: w.runtime_hours || w.estimated_duration_hours || null,
@@ -260,7 +260,6 @@ export default function WorkloadsPage() {
         user_id: w.user_id,
         // Additional fields
         LLM_select_init_confirm: w.LLM_select_init_confirm || null,
-        runtime_hours: w.runtime_hours || null,
         estimated_duration_hours: w.estimated_duration_hours || null,
         user_notes: w.user_notes || null,
         requested_compute: w.requested_compute || null,
@@ -598,7 +597,7 @@ export default function WorkloadsPage() {
               // Calculate progress based on elapsed time / total runtime
               let calculatedProgress = 0
               try {
-                const startTimeStr = workload.started_at || workload.actual_start
+                const startTimeStr = workload.started_at || (workload as any).actual_start
                 const runtimeHours = workload.runtime_hours || workload.estimated_duration_hours
                 
                 if (startTimeStr && runtimeHours) {
@@ -711,9 +710,9 @@ export default function WorkloadsPage() {
                   Carbon
                 </div>
                 <p className={`text-sm font-medium ${
-                  workload.actual_carbon_gco2 && workload.actual_carbon_gco2 < workload.carbon_cap_gco2 * 0.8
+                  workload.actual_carbon_gco2 && workload.carbon_cap_gco2 && workload.actual_carbon_gco2 < workload.carbon_cap_gco2 * 0.8
                     ? 'text-pylon-accent'
-                    : workload.actual_carbon_gco2 && workload.actual_carbon_gco2 > workload.carbon_cap_gco2
+                    : workload.actual_carbon_gco2 && workload.carbon_cap_gco2 && workload.actual_carbon_gco2 > workload.carbon_cap_gco2
                     ? 'text-red-500'
                     : 'text-pylon-dark'
                 }`}>
