@@ -3,14 +3,21 @@
 import Link from 'next/link'
 import Image from 'next/image'
 import { usePathname } from 'next/navigation'
-import { Home, ClipboardList, BarChart2, History, HelpCircle, Settings, ChevronRight } from 'lucide-react'
+import { Home, ClipboardList, BarChart2, History, HelpCircle, Settings, CreditCard, ChevronRight } from 'lucide-react'
 import clsx from 'clsx'
+
+// Sidebar styling constants
+const SIDEBAR_BG = '#121728'
+const SIDEBAR_TEXT_ACTIVE = 'text-white'
+const SIDEBAR_TEXT_INACTIVE = 'text-gray-300'
+const SIDEBAR_HOVER = 'hover:bg-[#1f2433]'
 
 const mainNavItems = [
   { icon: Home, label: 'Home', href: '/operator' },
   { icon: ClipboardList, label: 'Workloads', href: '/operator/workloads' },
   { icon: BarChart2, label: 'Analytics', href: '/operator/analytics' },
   { icon: History, label: 'History', href: '/operator/history' },
+  { icon: CreditCard, label: 'Billing', href: '/operator/billing' },
 ]
 
 const bottomNavItems = [
@@ -22,7 +29,10 @@ export default function OperatorSidebar() {
   const pathname = usePathname()
 
   return (
-    <aside className="fixed left-0 top-0 h-screen w-64 bg-pylon-dark flex flex-col z-40">
+    <aside 
+      className="fixed left-0 top-0 h-screen w-64 flex flex-col z-40"
+      style={{ backgroundColor: SIDEBAR_BG }}
+    >
       {/* Logo */}
       <div className="p-4 px-6 border-b border-white/10">
         <Link href="/" className="flex items-center justify-center">
@@ -37,7 +47,7 @@ export default function OperatorSidebar() {
 
       {/* Main Navigation */}
       <nav className="flex-1 py-6">
-        <ul className="space-y-1 px-3">
+        <ul className="space-y-1 px-3 mt-6">
           {mainNavItems.map((item) => {
             const isActive = pathname === item.href || (pathname?.startsWith(item.href + '/') && item.href !== '/operator')
             return (
@@ -47,12 +57,12 @@ export default function OperatorSidebar() {
                   className={clsx(
                     'flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors',
                     isActive
-                      ? 'bg-white/10 text-white'
-                      : 'text-white/60 hover:text-white hover:bg-white/5'
+                      ? 'bg-white/10 text-white font-medium'
+                      : `${SIDEBAR_TEXT_INACTIVE} ${SIDEBAR_HOVER} hover:text-white`
                   )}
                 >
                   <item.icon className="w-5 h-5 flex-shrink-0" />
-                  <span className="text-sm font-medium">{item.label}</span>
+                  <span className="text-sm">{item.label}</span>
                   {isActive && <ChevronRight className="w-4 h-4 ml-auto" />}
                 </Link>
               </li>
@@ -73,12 +83,12 @@ export default function OperatorSidebar() {
                   className={clsx(
                     'flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors',
                     isActive
-                      ? 'bg-white/10 text-white'
-                      : 'text-white/60 hover:text-white hover:bg-white/5'
+                      ? 'bg-white/10 text-white font-medium'
+                      : `${SIDEBAR_TEXT_INACTIVE} ${SIDEBAR_HOVER} hover:text-white`
                   )}
                 >
                   <item.icon className="w-5 h-5 flex-shrink-0" />
-                  <span className="text-sm font-medium">{item.label}</span>
+                  <span className="text-sm">{item.label}</span>
                 </Link>
               </li>
             )

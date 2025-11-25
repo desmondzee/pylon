@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { ChevronRight, TrendingUp, TrendingDown, Zap, Leaf, DollarSign, Clock, Download, Users } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
+import DemoDataControls from '@/components/DemoDataControls'
 
 type Period = '7 Days' | '30 Days' | '90 Days' | 'All Time'
 
@@ -251,6 +252,11 @@ export default function OperatorAnalyticsPage() {
             Export Report
           </button>
         </div>
+      </div>
+
+      {/* Demo Data Controls */}
+      <div className="bg-white rounded-lg border border-pylon-dark/5 p-4">
+        <DemoDataControls onDataChange={loadAnalyticsData} />
       </div>
 
       {/* Time period selector */}

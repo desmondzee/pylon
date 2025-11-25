@@ -645,9 +645,9 @@ export default function WorkloadsPage() {
                         </>
                       )
                     }
-                    return <p className="text-sm font-medium text-pylon-dark">Awaiting region selection</p>
+                    return <p className="text-sm font-medium text-pylon-dark">Awaiting user selection</p>
                   }
-                  return <p className="text-sm font-medium text-pylon-dark">{workload.host_dc || 'Not assigned'}</p>
+                  return <p className="text-sm font-medium text-pylon-dark">Awaiting user selection</p>
                 })()}
               </div>
               <div>

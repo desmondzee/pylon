@@ -532,22 +532,23 @@ export default function WorkloadDetailsModal({
 
   return (
     <>
-      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-        <div className="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] overflow-y-auto">
-          <div className="p-6">
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+        <div className="bg-white rounded-xl shadow-xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+          <div className="overflow-y-auto flex-1">
+            <div className="p-6">
             {/* Header */}
             <div className="flex items-start justify-between mb-6">
               <div className="flex-1">
                 <div className="flex items-center gap-3 mb-2">
-                  <h3 className="text-xl font-semibold text-pylon-dark">
-                    {workload.workload_name}
+                  <h3 className="text-xl font-semibold text-[#121728]">
+                    {workload.workload_name || 'Unnamed Workload'}
                   </h3>
                 </div>
-                <p className="text-sm text-pylon-dark/60 font-mono">{workload.job_id}</p>
+                <p className="text-sm text-gray-500 font-mono">{workload.job_id || 'N/A'}</p>
               </div>
               <button
                 onClick={onClose}
-                className="p-2 text-pylon-dark/40 hover:text-pylon-dark hover:bg-pylon-light rounded transition-colors"
+                className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -622,42 +623,69 @@ export default function WorkloadDetailsModal({
                 </div>
               )}
 
+              {/* User Chosen Option */}
+              {workload.chosen_grid_zone && locationName && (
+                <div>
+                  <h4 className="text-sm font-semibold text-pylon-dark mb-3 flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-green-600" />
+                    Chosen Region
+                  </h4>
+                  <div className="border-2 border-green-500 rounded-lg p-4 bg-green-50/30">
+                    <p className="text-sm font-semibold text-pylon-dark">{locationName}</p>
+                  </div>
+                </div>
+              )}
+
               {/* Recommended Locations */}
               {recommendedZones.length > 0 && (
                 <div>
                   <h4 className="text-sm font-semibold text-pylon-dark mb-3 flex items-center gap-2">
                     <MapPin className="w-4 h-4" />
-                    Recommended Locations
+                    Recommended Options
                   </h4>
                   <div className="space-y-2">
-                    {recommendedZones.map((zone, index) => (
-                      <div
-                        key={zone.id}
-                        className="border border-pylon-dark/10 rounded-lg p-3 bg-pylon-light/30"
-                      >
-                        <div className="flex items-start justify-between">
-                          <div>
-                            <p className="text-sm font-medium text-pylon-dark">
-                              {index + 1}. {zone.name}
-                            </p>
-                            <div className="flex gap-4 mt-1 text-xs text-pylon-dark/60">
-                              {zone.carbon !== null && zone.carbon !== undefined && (
-                                <span>
-                                  <Leaf className="w-3 h-3 inline mr-1" />
-                                  Carbon: {zone.carbon.toFixed(1)} gCO₂/kWh
-                                </span>
-                              )}
-                              {zone.renewable !== null && zone.renewable !== undefined && (
-                                <span>
-                                  <Zap className="w-3 h-3 inline mr-1" />
-                                  Renewable: {zone.renewable.toFixed(1)}%
-                                </span>
-                              )}
+                    {recommendedZones.map((zone, index) => {
+                      const isSelected = workload.chosen_grid_zone === zone.id
+                      return (
+                        <div
+                          key={zone.id}
+                          className={`border rounded-lg p-3 ${
+                            isSelected
+                              ? 'border-green-500 bg-green-50/50'
+                              : 'border-pylon-dark/10 bg-pylon-light/30'
+                          }`}
+                        >
+                          <div className="flex items-start justify-between">
+                            <div className="flex-1">
+                              <div className="flex items-center gap-2 mb-1">
+                                <p className="text-sm font-medium text-pylon-dark">
+                                  {index + 1}. {zone.name}
+                                </p>
+                                {isSelected && (
+                                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold text-white bg-green-600">
+                                    SELECTED OPTION
+                                  </span>
+                                )}
+                              </div>
+                              <div className="flex gap-4 mt-1 text-xs text-pylon-dark/60">
+                                {zone.carbon !== null && zone.carbon !== undefined && (
+                                  <span>
+                                    <Leaf className="w-3 h-3 inline mr-1" />
+                                    Carbon: {zone.carbon.toFixed(1)} gCO₂/kWh
+                                  </span>
+                                )}
+                                {zone.renewable !== null && zone.renewable !== undefined && (
+                                  <span>
+                                    <Zap className="w-3 h-3 inline mr-1" />
+                                    Renewable: {zone.renewable.toFixed(1)}%
+                                  </span>
+                                )}
+                              </div>
                             </div>
                           </div>
                         </div>
-                      </div>
-                    ))}
+                      )
+                    })}
                   </div>
                 </div>
               )}
@@ -766,17 +794,14 @@ export default function WorkloadDetailsModal({
                       if (statusUpper === 'PENDING' || statusUpper === 'PENDING_USER_CHOICE') {
                         return <p className="text-sm font-medium text-pylon-dark">Pending</p>
                       }
-                      if (locationName) {
-                        return <p className="text-sm font-medium text-pylon-dark">{locationName}</p>
-                      }
                       if (workload.chosen_grid_zone) {
-                        return <p className="text-sm font-medium text-pylon-dark">Awaiting region selection</p>
+                        if (locationName) {
+                          return <p className="text-sm font-medium text-pylon-dark">{locationName}</p>
+                        }
+                        return <p className="text-sm font-medium text-pylon-dark">Awaiting user selection</p>
                       }
-                      return <p className="text-sm font-medium text-pylon-dark">{workload.host_dc || 'Not assigned'}</p>
+                      return <p className="text-sm font-medium text-pylon-dark">Awaiting user selection</p>
                     })()}
-                    {workload.region && (
-                      <p className="text-xs text-pylon-dark/60 mt-1">{workload.region}</p>
-                    )}
                   </div>
                 </div>
               </div>
@@ -1008,13 +1033,14 @@ export default function WorkloadDetailsModal({
               })()}
             </div>
 
-            <div className="flex justify-end pt-4 border-t border-pylon-dark/10 mt-6">
+            <div className="flex justify-end pt-6 border-t border-gray-200 mt-6">
               <button
                 onClick={onClose}
-                className="px-4 py-2 text-sm font-medium text-white bg-pylon-dark rounded hover:bg-pylon-dark/90 transition-colors"
+                className="px-4 py-2 text-sm font-medium text-white bg-[#121728] rounded-lg hover:bg-[#1a1f2e] transition-colors"
               >
                 Close
               </button>
+            </div>
             </div>
           </div>
         </div>

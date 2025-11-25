@@ -12,10 +12,10 @@ export default function StatsSection() {
     <section className="py-24 lg:py-32">
       <div className="container-wide">
         <div className="text-center mb-16 lg:mb-20">
-          <h2 className="text-3xl lg:text-4xl font-semibold text-pylon-dark mb-4">
+          <h2 className="text-3xl lg:text-4xl font-semibold text-[#121728] mb-4">
             Infrastructure as Arbitrage
           </h2>
-          <p className="text-lg text-pylon-dark/60 max-w-2xl mx-auto">
+          <p className="text-lg text-gray-600 max-w-2xl mx-auto">
             Working to solve everyone's problem simultaneously. Data centres unlock new revenue,
             tenants cut costs, and grid peaks collapse.
           </p>
@@ -24,13 +24,13 @@ export default function StatsSection() {
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-8 lg:gap-12">
           {stats.map((stat) => (
             <div key={stat.label} className="text-center">
-              <div className="text-4xl lg:text-5xl font-semibold text-pylon-dark mb-2">
+              <div className="text-4xl lg:text-5xl font-semibold text-[#121728] mb-2">
                 {stat.value}
               </div>
-              <div className="text-base font-medium text-pylon-dark mb-1">
+              <div className="text-base font-medium text-[#121728] mb-1">
                 {stat.label}
               </div>
-              <div className="text-sm text-pylon-dark/50">
+              <div className="text-sm text-gray-500">
                 {stat.sublabel}
               </div>
             </div>
