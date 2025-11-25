@@ -265,6 +265,17 @@ export default function WorkloadsPage() {
         recommended_2_renewable_mix: w.recommended_2_renewable_mix || null,
         recommended_3_carbon_intensity: w.recommended_3_carbon_intensity || null,
         recommended_3_renewable_mix: w.recommended_3_renewable_mix || null,
+        // BPP fields
+        beckn_order_id: w.beckn_order_id || null,
+        update_request_pending: w.update_request_pending || false,
+        status_query_pending: w.status_query_pending || false,
+        rating_request_pending: w.rating_request_pending || false,
+        support_request_pending: w.support_request_pending || false,
+        // Action results
+        llm_update_response: w.llm_update_response || null,
+        llm_status_response: w.llm_status_response || null,
+        llm_rating_response: w.llm_rating_response || null,
+        llm_support_response: w.llm_support_response || null,
       }))
 
       setWorkloads(transformedWorkloads)

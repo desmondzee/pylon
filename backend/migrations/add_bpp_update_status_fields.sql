@@ -22,45 +22,45 @@ ADD COLUMN IF NOT EXISTS update_request_type VARCHAR(50), -- 'carbon_intensity_u
 ADD COLUMN IF NOT EXISTS update_request_pending BOOLEAN DEFAULT FALSE,
 ADD COLUMN IF NOT EXISTS update_request_payload JSONB, -- Store the update request payload
 ADD COLUMN IF NOT EXISTS update_response_payload JSONB, -- Store the on_update response
-ADD COLUMN IF NOT EXISTS LLM_update_response TEXT; -- LLM summary of update response
+ADD COLUMN IF NOT EXISTS llm_update_response TEXT; -- LLM summary of update response
 
 COMMENT ON COLUMN compute_workloads.update_request_type IS 'Type of update request: carbon_intensity_update, workload_shift, or NULL';
 COMMENT ON COLUMN compute_workloads.update_request_pending IS 'Flag indicating an update request is pending processing';
 COMMENT ON COLUMN compute_workloads.update_request_payload IS 'JSON payload for the update request';
 COMMENT ON COLUMN compute_workloads.update_response_payload IS 'JSON response from on_update callback';
-COMMENT ON COLUMN compute_workloads.LLM_update_response IS 'Gemini LLM-generated summary of the update response';
+COMMENT ON COLUMN compute_workloads.llm_update_response IS 'Gemini LLM-generated summary of the update response';
 
 -- Add status query tracking fields
 ALTER TABLE compute_workloads
 ADD COLUMN IF NOT EXISTS status_query_pending BOOLEAN DEFAULT FALSE,
 ADD COLUMN IF NOT EXISTS status_response_payload JSONB, -- Store the on_status response
-ADD COLUMN IF NOT EXISTS LLM_status_response TEXT; -- LLM summary of status response
+ADD COLUMN IF NOT EXISTS llm_status_response TEXT; -- LLM summary of status response
 
 COMMENT ON COLUMN compute_workloads.status_query_pending IS 'Flag indicating a status query is pending processing';
 COMMENT ON COLUMN compute_workloads.status_response_payload IS 'JSON response from on_status callback';
-COMMENT ON COLUMN compute_workloads.LLM_status_response IS 'Gemini LLM-generated summary of the status response';
+COMMENT ON COLUMN compute_workloads.llm_status_response IS 'Gemini LLM-generated summary of the status response';
 
 -- Add rating submission tracking fields
 ALTER TABLE compute_workloads
 ADD COLUMN IF NOT EXISTS rating_request_pending BOOLEAN DEFAULT FALSE,
 ADD COLUMN IF NOT EXISTS rating_request_payload JSONB, -- Store the rating request payload (value, category, feedback, etc.)
 ADD COLUMN IF NOT EXISTS rating_response_payload JSONB, -- Store the on_rating response
-ADD COLUMN IF NOT EXISTS LLM_rating_response TEXT; -- LLM summary of rating response
+ADD COLUMN IF NOT EXISTS llm_rating_response TEXT; -- LLM summary of rating response
 
 COMMENT ON COLUMN compute_workloads.rating_request_pending IS 'Flag indicating a rating submission is pending processing';
 COMMENT ON COLUMN compute_workloads.rating_request_payload IS 'JSON payload for the rating request (value, category, feedback, etc.)';
 COMMENT ON COLUMN compute_workloads.rating_response_payload IS 'JSON response from on_rating callback';
-COMMENT ON COLUMN compute_workloads.LLM_rating_response IS 'Gemini LLM-generated summary of the rating response';
+COMMENT ON COLUMN compute_workloads.llm_rating_response IS 'Gemini LLM-generated summary of the rating response';
 
 -- Add support request tracking fields
 ALTER TABLE compute_workloads
 ADD COLUMN IF NOT EXISTS support_request_pending BOOLEAN DEFAULT FALSE,
 ADD COLUMN IF NOT EXISTS support_response_payload JSONB, -- Store the on_support response
-ADD COLUMN IF NOT EXISTS LLM_support_response TEXT; -- LLM summary of support response
+ADD COLUMN IF NOT EXISTS llm_support_response TEXT; -- LLM summary of support response
 
 COMMENT ON COLUMN compute_workloads.support_request_pending IS 'Flag indicating a support request is pending processing';
 COMMENT ON COLUMN compute_workloads.support_response_payload IS 'JSON response from on_support callback';
-COMMENT ON COLUMN compute_workloads.LLM_support_response IS 'Gemini LLM-generated summary of the support response';
+COMMENT ON COLUMN compute_workloads.llm_support_response IS 'Gemini LLM-generated summary of the support response';
 
 -- Create indexes for efficient querying
 CREATE INDEX IF NOT EXISTS idx_workloads_update_request_pending 

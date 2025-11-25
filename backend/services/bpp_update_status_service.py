@@ -17,6 +17,7 @@ import time
 import logging
 import uuid
 import json
+import copy
 import requests
 from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor
@@ -83,7 +84,27 @@ def call_bpp_update(workload: dict, update_type: str, update_payload: dict) -> d
     
     # Use the payload from database if available, otherwise construct from update_type
     if update_payload:
-        update_request = update_payload
+        # Use provided payload but update context fields with fresh values (deep copy)
+        update_request = copy.deepcopy(update_payload)
+        if 'context' in update_request:
+            update_request['context']['timestamp'] = timestamp
+            update_request['context']['message_id'] = message_id
+            update_request['context']['transaction_id'] = transaction_id
+        else:
+            # If no context, add it
+            update_request['context'] = {
+                "version": "2.0.0",
+                "action": "update",
+                "domain": "beckn.one:DEG:compute-energy:1.0",
+                "timestamp": timestamp,
+                "message_id": message_id,
+                "transaction_id": transaction_id,
+                "bap_id": BAP_ID,
+                "bap_uri": BAP_URI,
+                "bpp_id": BPP_ID,
+                "bpp_uri": "https://ev-charging.sandbox1.com.com/bpp",
+                "ttl": "PT30S"
+            }
     else:
         # Construct default payload based on update_type
         if update_type == 'carbon_intensity_update':
@@ -560,7 +581,7 @@ def process_update_request(workload: dict) -> bool:
         logger.info(f"[{workload_id}] Summary generated: {llm_summary[:100]}...")
         
         # Step 3: Get existing summary to append
-        existing_summary = workload.get('LLM_update_response') or ""
+        existing_summary = workload.get('llm_update_response') or ""
         if existing_summary:
             new_summary = f"{existing_summary}\n{llm_summary}"
         else:
@@ -571,7 +592,7 @@ def process_update_request(workload: dict) -> bool:
         update_data = {
             "update_request_pending": False,
             "update_response_payload": update_response,
-            "LLM_update_response": new_summary,
+            "llm_update_response": new_summary,
             "updated_at": datetime.now(timezone.utc).isoformat()
         }
         
@@ -585,7 +606,7 @@ def process_update_request(workload: dict) -> bool:
         try:
             supabase.table("compute_workloads").update({
                 "update_request_pending": False,
-                "LLM_update_response": f"Failed: {str(e)}",
+                "llm_update_response": f"Failed: {str(e)}",
                 "updated_at": datetime.now(timezone.utc).isoformat()
             }).eq("id", workload_id).execute()
         except Exception as update_err:
@@ -621,7 +642,7 @@ def process_status_query(workload: dict) -> bool:
         logger.info(f"[{workload_id}] Summary generated: {llm_summary[:100]}...")
         
         # Step 3: Get existing summary to append
-        existing_summary = workload.get('LLM_status_response') or ""
+        existing_summary = workload.get('llm_status_response') or ""
         if existing_summary:
             new_summary = f"{existing_summary}\n{llm_summary}"
         else:
@@ -632,7 +653,7 @@ def process_status_query(workload: dict) -> bool:
         update_data = {
             "status_query_pending": False,
             "status_response_payload": status_response,
-            "LLM_status_response": new_summary,
+            "llm_status_response": new_summary,
             "updated_at": datetime.now(timezone.utc).isoformat()
         }
         
@@ -646,7 +667,7 @@ def process_status_query(workload: dict) -> bool:
         try:
             supabase.table("compute_workloads").update({
                 "status_query_pending": False,
-                "LLM_status_response": f"Failed: {str(e)}",
+                "llm_status_response": f"Failed: {str(e)}",
                 "updated_at": datetime.now(timezone.utc).isoformat()
             }).eq("id", workload_id).execute()
         except Exception as update_err:
@@ -683,7 +704,7 @@ def process_rating_request(workload: dict) -> bool:
         logger.info(f"[{workload_id}] Summary generated: {llm_summary[:100]}...")
         
         # Step 3: Get existing summary to append
-        existing_summary = workload.get('LLM_rating_response') or ""
+        existing_summary = workload.get('llm_rating_response') or ""
         if existing_summary:
             new_summary = f"{existing_summary}\n{llm_summary}"
         else:
@@ -694,7 +715,7 @@ def process_rating_request(workload: dict) -> bool:
         update_data = {
             "rating_request_pending": False,
             "rating_response_payload": rating_response,
-            "LLM_rating_response": new_summary,
+            "llm_rating_response": new_summary,
             "updated_at": datetime.now(timezone.utc).isoformat()
         }
         
@@ -708,7 +729,7 @@ def process_rating_request(workload: dict) -> bool:
         try:
             supabase.table("compute_workloads").update({
                 "rating_request_pending": False,
-                "LLM_rating_response": f"Failed: {str(e)}",
+                "llm_rating_response": f"Failed: {str(e)}",
                 "updated_at": datetime.now(timezone.utc).isoformat()
             }).eq("id", workload_id).execute()
         except Exception as update_err:
@@ -744,7 +765,7 @@ def process_support_request(workload: dict) -> bool:
         logger.info(f"[{workload_id}] Summary generated: {llm_summary[:100]}...")
         
         # Step 3: Get existing summary to append
-        existing_summary = workload.get('LLM_support_response') or ""
+        existing_summary = workload.get('llm_support_response') or ""
         if existing_summary:
             new_summary = f"{existing_summary}\n{llm_summary}"
         else:
@@ -755,7 +776,7 @@ def process_support_request(workload: dict) -> bool:
         update_data = {
             "support_request_pending": False,
             "support_response_payload": support_response,
-            "LLM_support_response": new_summary,
+            "llm_support_response": new_summary,
             "updated_at": datetime.now(timezone.utc).isoformat()
         }
         
@@ -769,7 +790,7 @@ def process_support_request(workload: dict) -> bool:
         try:
             supabase.table("compute_workloads").update({
                 "support_request_pending": False,
-                "LLM_support_response": f"Failed: {str(e)}",
+                "llm_support_response": f"Failed: {str(e)}",
                 "updated_at": datetime.now(timezone.utc).isoformat()
             }).eq("id", workload_id).execute()
         except Exception as update_err:
