@@ -20,6 +20,7 @@ export default function OperatorDashboard() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [gridZoneMap, setGridZoneMap] = useState<GridZoneMap>({})
+  const [isMapExpanded, setIsMapExpanded] = useState(false)
   const [stats, setStats] = useState({
     activeWorkloads: 0,
     totalWorkloads: 0,
@@ -400,9 +401,30 @@ export default function OperatorDashboard() {
         </div>
           </div>
 
-          {/* Live Data Center Map */}
+          {/* Live Data Center Map - Collapsible */}
           <div id="data-center-map">
-            <DataCenterMap />
+            {isMapExpanded ? (
+              <DataCenterMap onCollapse={() => setIsMapExpanded(false)} />
+            ) : (
+              <button
+                onClick={() => setIsMapExpanded(true)}
+                className="w-full bg-white rounded-lg border border-pylon-dark/5 p-8 hover:border-pylon-accent transition-all group text-center"
+              >
+                <div className="flex flex-col items-center gap-3">
+                  <div className="w-16 h-16 bg-pylon-accent/10 rounded-lg flex items-center justify-center group-hover:bg-pylon-accent/20 transition-colors">
+                    <MapPin className="w-8 h-8 text-pylon-accent" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-semibold text-pylon-dark mb-1">Live Data Center Map</h3>
+                    <p className="text-sm text-pylon-dark/60">Click to view geographical workload distribution</p>
+                  </div>
+                  <div className="flex items-center gap-2 text-sm text-pylon-accent font-medium">
+                    <span>Expand Map</span>
+                    <ArrowUpRight className="w-4 h-4" />
+                  </div>
+                </div>
+              </button>
+            )}
           </div>
 
           {/* Quick Actions */}

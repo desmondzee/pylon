@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Server, Zap, Activity, X, MapPin } from 'lucide-react'
+import { Server, Zap, Activity, X, MapPin, Minimize2 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import dynamic from 'next/dynamic'
 
@@ -59,7 +59,11 @@ interface DataCenterInfo {
   avgCarbon: number
 }
 
-export default function DataCenterMap() {
+interface DataCenterMapProps {
+  onCollapse?: () => void
+}
+
+export default function DataCenterMap({ onCollapse }: DataCenterMapProps = {}) {
   const [dataCenters, setDataCenters] = useState<DataCenterInfo[]>([])
   const [allZones, setAllZones] = useState<GridZone[]>([])
   const [selectedDataCenter, setSelectedDataCenter] = useState<DataCenterInfo | null>(null)
@@ -539,6 +543,17 @@ export default function DataCenterMap() {
             </p>
           </div>
           <div className="flex items-center gap-4">
+            {/* Collapse button */}
+            {onCollapse && (
+              <button
+                onClick={onCollapse}
+                className="px-3 py-2 text-xs font-medium text-white/60 hover:text-white bg-white/10 hover:bg-white/20 rounded transition-all flex items-center gap-2"
+                title="Collapse map"
+              >
+                <Minimize2 className="w-4 h-4" />
+                Collapse
+              </button>
+            )}
             {/* Toggle Button */}
             <button
               onClick={() => setShowOnlyActive(!showOnlyActive)}
