@@ -579,15 +579,26 @@ def process_workload(workload: dict) -> bool:
         confirm_response = confirm_result.get('data')
         logger.info(f"[{workload_id}] CONFIRM successful")
         
+        # Extract beckn_order_id from CONFIRM response
+        beckn_order_id = None
+        try:
+            order = confirm_response.get('message', {}).get('order', {})
+            beckn_order_id = order.get('beckn:id') or order_id  # Fallback to our generated order_id
+            logger.info(f"[{workload_id}] Extracted beckn_order_id: {beckn_order_id}")
+        except Exception as e:
+            logger.warning(f"[{workload_id}] Could not extract beckn_order_id from response, using generated: {e}")
+            beckn_order_id = order_id
+        
         # Step 6: Summarize with Gemini
         logger.info(f"[{workload_id}] Step 4: Generating summary with Gemini")
         llm_summary = summarize_responses(select_response, init_response, confirm_response)
         logger.info(f"[{workload_id}] Summary generated ({len(llm_summary)} chars): {llm_summary[:150]}...")
         
-        # Step 7: Update Supabase with summary and set status to 'running'
-        logger.info(f"[{workload_id}] Step 5: Updating Supabase with LLM summary")
+        # Step 7: Update Supabase with summary, beckn_order_id, and set status to 'running'
+        logger.info(f"[{workload_id}] Step 5: Updating Supabase with LLM summary and beckn_order_id")
         update_result = supabase.table("compute_workloads").update({
             "LLM_select_init_confirm": llm_summary,
+            "beckn_order_id": beckn_order_id,
             "bpp_processed": True,
             "status": "running",
             "updated_at": datetime.now(timezone.utc).isoformat()
