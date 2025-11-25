@@ -22,6 +22,10 @@ const CircleMarker = dynamic(
   () => import('react-leaflet').then((mod) => mod.CircleMarker),
   { ssr: false }
 )
+const Marker = dynamic(
+  () => import('react-leaflet').then((mod) => mod.Marker),
+  { ssr: false }
+)
 
 interface GridZone {
   id: string
@@ -706,21 +710,22 @@ export default function DataCenterMap() {
                 const size = 10 + Math.min(dc.workloads.length * 1.5, 10)
 
                 return (
-                  <CircleMarker
-                    key={dc.gridZone.id}
-                    center={[dc.gridZone.coordinates.lat, dc.gridZone.coordinates.lng]}
-                    radius={size}
-                    pathOptions={{
-                      color: isActive ? '#10b981' : '#f59e0b',
-                      fillColor: isActive ? '#059669' : '#d97706',
-                      fillOpacity: 0.7,
-                      weight: 2,
-                      opacity: 1,
-                    }}
-                    eventHandlers={{
-                      click: () => setSelectedDataCenter(dc),
-                    }}
-                  >
+                  <>
+                    <CircleMarker
+                      key={dc.gridZone.id}
+                      center={[dc.gridZone.coordinates.lat, dc.gridZone.coordinates.lng]}
+                      radius={size}
+                      pathOptions={{
+                        color: isActive ? '#10b981' : '#f59e0b',
+                        fillColor: isActive ? '#059669' : '#d97706',
+                        fillOpacity: 0.7,
+                        weight: 2,
+                        opacity: 1,
+                      }}
+                      eventHandlers={{
+                        click: () => setSelectedDataCenter(dc),
+                      }}
+                    >
                     <Popup>
                       <div className="p-3 min-w-[220px] bg-pylon-dark text-white">
                         <h3 className="font-semibold text-white mb-1">{dc.gridZone.zone_name}</h3>
@@ -748,6 +753,27 @@ export default function DataCenterMap() {
                       </div>
                     </Popup>
                   </CircleMarker>
+
+                  {/* Text label showing job count */}
+                  <Marker
+                    key={`label-${dc.gridZone.id}`}
+                    position={[dc.gridZone.coordinates.lat, dc.gridZone.coordinates.lng]}
+                    icon={
+                      typeof window !== 'undefined' && (window as any).L
+                        ? new (window as any).L.DivIcon({
+                            html: `<div style="display: flex; align-items: center; justify-content: center; width: 40px; height: 20px; margin-left: -20px; margin-top: -10px;">
+                                    <span style="color: white; font-weight: bold; font-size: 11px; text-shadow: 1px 1px 2px rgba(0,0,0,0.8), -1px -1px 2px rgba(0,0,0,0.8), 1px -1px 2px rgba(0,0,0,0.8), -1px 1px 2px rgba(0,0,0,0.8);">
+                                      ${dc.activeWorkloads}
+                                    </span>
+                                  </div>`,
+                            className: 'job-count-label',
+                            iconSize: [40, 20],
+                            iconAnchor: [20, 10],
+                          })
+                        : undefined
+                    }
+                  />
+                </>
                 )
               })}
             </MapContainer>
